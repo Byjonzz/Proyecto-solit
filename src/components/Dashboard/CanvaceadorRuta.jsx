@@ -303,7 +303,7 @@ const CanvaceadorRuta = ({ usuarioActual }) => {
             latitud: posicionGPS[0],
             longitud: posicionGPS[1]
           });
-          console.log("📍 [TELEMETRÍA ENVIADA]");
+          console.log(" [TELEMETRÍA ENVIADA]");
         } catch (e) {
           console.error("Error al enviar ping:", e);
         }

@@ -13,7 +13,8 @@ import {
 } from '@mui/material';
 import {
   BorderColor, Save, CheckCircle, AddPhotoAlternate, InfoOutlined,
-  MyLocation, ContentCopy, WhatsApp, PinDrop, LocalOffer, SimCard
+  MyLocation, ContentCopy, WhatsApp, PinDrop, LocalOffer, SimCard,
+  Receipt, Home 
 } from '@mui/icons-material';
 import { MapContainer, TileLayer, CircleMarker, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -21,7 +22,7 @@ import 'leaflet/dist/leaflet.css';
 const pasosContrato = [
   { label: 'Datos Personales y Contacto', description: 'INE, teléfonos y correo (Obligatorios).' },
   { label: 'Ubicación y Plan', description: 'Dirección, referencias y paquete comercial.' },
-  { label: 'Evidencias y Cierre', description: 'Fotos del INE, Desglose de cobro y Firma.' }
+  { label: 'Evidencias y Cierre', description: 'Fotos del INE, Recibo, Fachada y Firma.' } 
 ];
 
 const ClicEnMapa = ({ alHacerClic }) => {
@@ -36,7 +37,6 @@ const ClicEnMapa = ({ alHacerClic }) => {
 
 const PlanCotizacion = ({ usuarioActual }) => {
   const location = useLocation();
-  
   const { createContrato, loading: loadingContrato } = useContratos();
 
   const [activeStep, setActiveStep] = useState(0);
@@ -66,6 +66,10 @@ const PlanCotizacion = ({ usuarioActual }) => {
   const [coordenadas, setCoordenadas] = useState('');
   const [linkCopiado, setLinkCopiado] = useState(false);
   const [mapPin, setMapPin] = useState(null);
+  const [fotoFrenteINE, setFotoFrenteINE] = useState(null);
+  const [fotoReversoINE, setFotoReversoINE] = useState(null);
+  const [fotoReciboLuz, setFotoReciboLuz] = useState(null);
+  const [fotoFachada, setFotoFachada] = useState(null);
 
   const canvasRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -73,7 +77,6 @@ const PlanCotizacion = ({ usuarioActual }) => {
   useEffect(() => {
     if (location.state && location.state.datosDesdeProspecto) {
       const prospecto = location.state.datosDesdeProspecto;
-      
       setFormData(prev => ({
         ...prev,
         nombre: prospecto.nombre || '',
@@ -212,6 +215,25 @@ const PlanCotizacion = ({ usuarioActual }) => {
 
   const handleBack = () => setActiveStep((prev) => prev - 1);
 
+  const handleImageUpload = (e, setPhotoState) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (!file.type.startsWith('image/')) {
+        alert('Por favor selecciona un archivo de imagen válido');
+        return;
+      }
+      
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPhotoState(reader.result); 
+      };
+      reader.onerror = () => {
+        alert('Error al leer la imagen. Intenta de nuevo.');
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setErrorApi(null);
@@ -298,9 +320,11 @@ const PlanCotizacion = ({ usuarioActual }) => {
         costo_chip: costoChip,
         firma_digital: firmaDigital,
         estatus: 'Pendiente Asignar',
-        foto_ine_frente: '',
-        foto_ine_reverso: '',
-        foto_fachada: '',
+        
+        foto_ine_frente: fotoFrenteINE || '',
+        foto_ine_reverso: fotoReversoINE || '',
+        foto_recibo_luz: fotoReciboLuz || '',
+        foto_fachada: fotoFachada || '',
         foto_poste: ''
       };
 
@@ -327,7 +351,7 @@ const PlanCotizacion = ({ usuarioActual }) => {
         }
       }
 
-      const nuevoContrato = await createContrato(datosContrato);
+      await createContrato(datosContrato);
 
       setTimeout(() => {
         setGuardado(false);
@@ -341,6 +365,11 @@ const PlanCotizacion = ({ usuarioActual }) => {
         setMetodoUbicacion('manual');
         setActivarChip(false);
         limpiarFirma();
+        
+        setFotoFrenteINE(null);
+        setFotoReversoINE(null);
+        setFotoReciboLuz(null);
+        setFotoFachada(null);
       }, 3000);
 
     } catch (err) {
@@ -544,7 +573,7 @@ const PlanCotizacion = ({ usuarioActual }) => {
 
                   {loadingGeocode && (
                     <Alert severity="info" sx={{ mt: 2, textAlign: 'left' }}>
-                      <CircularProgress size={16} sx={{ mr: 1, verticalAlign: 'middle' }} /> Traduciendo coordenadas con Google...
+                      <CircularProgress size={16} sx={{ mr: 1, verticalAlign: 'middle' }} />
                     </Alert>
                   )}
 
@@ -584,17 +613,77 @@ const PlanCotizacion = ({ usuarioActual }) => {
         const totales = calcularTotales();
         return (
           <Box sx={{ mt: 2 }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>Evidencias</Typography>
+            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 2 }}>Evidencias Fotográficas</Typography>
+            
+            <Typography variant="caption" sx={{ fontWeight: 600, mb: 1, display: 'block', color: '#475569' }}>
+              Documento de Identidad
+            </Typography>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 3 }}>
-              <Button variant="outlined" color="primary" component="label" startIcon={<AddPhotoAlternate />} fullWidth>
-                Foto Frente INE
-                <input type="file" hidden accept="image/*" capture="environment" />
+              <Button 
+                variant={fotoFrenteINE ? "contained" : "outlined"} 
+                color={fotoFrenteINE ? "success" : "primary"} 
+                component="label" 
+                startIcon={<AddPhotoAlternate />} 
+                fullWidth
+                sx={{ py: 2 }}
+              >
+                {fotoFrenteINE ? "✓ Frente INE Cargado" : "Foto Frente INE"}
+                <input type="file" hidden accept="image/*" capture="environment" onChange={(e) => handleImageUpload(e, setFotoFrenteINE)} />
               </Button>
-              <Button variant="outlined" color="primary" component="label" startIcon={<AddPhotoAlternate />} fullWidth>
-                Foto Reverso INE
-                <input type="file" hidden accept="image/*" capture="environment" />
+              <Button 
+                variant={fotoReversoINE ? "contained" : "outlined"} 
+                color={fotoReversoINE ? "success" : "primary"} 
+                component="label" 
+                startIcon={<AddPhotoAlternate />} 
+                fullWidth
+                sx={{ py: 2 }}
+              >
+                {fotoReversoINE ? "✓ Reverso INE Cargado" : "Foto Reverso INE"}
+                <input type="file" hidden accept="image/*" capture="environment" onChange={(e) => handleImageUpload(e, setFotoReversoINE)} />
               </Button>
             </Stack>
+
+            <Typography variant="caption" sx={{ fontWeight: 600, mb: 1, display: 'block', color: '#475569' }}>
+              Evidencias del Domicilio
+            </Typography>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 3 }}>
+              <Button 
+                variant={fotoReciboLuz ? "contained" : "outlined"} 
+                color={fotoReciboLuz ? "success" : "warning"} 
+                component="label" 
+                startIcon={<Receipt />} 
+                fullWidth
+                sx={{ py: 2 }}
+              >
+                {fotoReciboLuz ? "✓ Recibo de Luz Cargado" : "Foto Recibo de Luz"}
+                <input type="file" hidden accept="image/*" capture="environment" onChange={(e) => handleImageUpload(e, setFotoReciboLuz)} />
+              </Button>
+              <Button 
+                variant={fotoFachada ? "contained" : "outlined"} 
+                color={fotoFachada ? "success" : "info"} 
+                component="label" 
+                startIcon={<Home />} 
+                fullWidth
+                sx={{ py: 2 }}
+              >
+                {fotoFachada ? "✓ Fachada Cargada" : " Foto Fachada"}
+                <input type="file" hidden accept="image/*" capture="environment" onChange={(e) => handleImageUpload(e, setFotoFachada)} />
+              </Button>
+            </Stack>
+
+            {(fotoFrenteINE || fotoReversoINE || fotoReciboLuz || fotoFachada) && (
+              <Box sx={{ mb: 3, p: 2, bgcolor: '#f0f9ff', borderRadius: 2, border: '1px solid #bae6fd' }}>
+                <Typography variant="caption" sx={{ fontWeight: 600, mb: 1, display: 'block' }}>
+                  Fotos listas para enviar:
+                </Typography>
+                <Stack direction="row" spacing={1} flexWrap="wrap" gap={1}>
+                  {fotoFrenteINE && <Chip label="✓ Frente INE" color="success" size="small" />}
+                  {fotoReversoINE && <Chip label="✓ Reverso INE" color="success" size="small" />}
+                  {fotoReciboLuz && <Chip label="✓ Recibo Luz" color="warning" size="small" />}
+                  {fotoFachada && <Chip label="✓ Fachada" color="info" size="small" />}
+                </Stack>
+              </Box>
+            )}
 
             <Card variant="outlined" sx={{ mb: 3, borderColor: '#0ea5e9', bgcolor: '#f0f9ff' }}>
               <CardContent>

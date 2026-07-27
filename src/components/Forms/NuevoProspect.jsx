@@ -183,40 +183,48 @@ const NuevoProspect = ({ usuarioActual }) => {
     notas_canvaceador: ''
   });
 
-  const obtenerIDCanvaceadorBD = async () => {
-    try {
-      const respuesta = await api.get('/canvaceadores/');
-      const lista = respuesta.data;
+  // 🚀 LA NUEVA FUNCIÓN MÁGICA "DOBLE BUSCADOR" (TÉCNICOS Y CANVACEADORES)
+  const obtenerIdYRolReal = async () => {
+    let idFinal = null;
+    let rolDetectado = null;
 
-      if (lista && lista.length > 0) {
-        const perfilId = Number(usuarioActual?.perfil_id);
-        const nombreUsuario = (usuarioActual?.nombre || '').toLowerCase().trim();
-        const apellidoUsuario = (usuarioActual?.apellido || '').toLowerCase().trim();
+    const rolSesion = (usuarioActual?.rol || '').toLowerCase().trim();
+    const idUsuarioLogueado = Number(usuarioActual?.id);
+    const nombreCompleto = `${usuarioActual?.nombre || ''} ${usuarioActual?.apellido || ''}`.trim().toLowerCase();
 
-        let match = lista.find(c => c.id === perfilId);
+    // 1. SI ES UN CANVACEADOR
+    if (rolSesion === 'canvaceador') {
+      rolDetectado = 'canvaceador';
+      if (usuarioActual?.perfil_id) return { id: Number(usuarioActual.perfil_id), rol: rolDetectado };
 
-        if (!match && nombreUsuario) {
-          match = lista.find(c => {
-            const cUser = String(c.usuario || '').toLowerCase().trim();
-            const cApel = String(c.apellido || '').toLowerCase().trim();
-            return cUser === nombreUsuario && cApel === apellidoUsuario;
-          });
-        }
+      try {
+        const resCanv = await api.get('/canvaceadores/');
+        const match = resCanv.data.find(c => {
+          const uId_1 = typeof c.usuario_id === 'object' ? c.usuario_id?.id : c.usuario_id;
+          const numEmpleado = String(c.numero_empleado || '').toLowerCase().trim();
+          return Number(uId_1) === idUsuarioLogueado || numEmpleado === nombreCompleto;
+        });
+        if (match) idFinal = match.id;
+      } catch (error) { console.error("Error canvaceadores:", error); }
+    } 
+    
+    // 2. SI ES UN TÉCNICO
+    else if (rolSesion === 'tecnico') {
+      rolDetectado = 'tecnico';
+      if (usuarioActual?.perfil_id) return { id: Number(usuarioActual.perfil_id), rol: rolDetectado };
 
-        if (!match && nombreUsuario) {
-          match = lista.find(c => {
-            const cUser = String(c.usuario || '').toLowerCase().trim();
-            return cUser === nombreUsuario;
-          });
-        }
-
-        if (match) return match.id;
-      }
-    } catch (error) {
-      console.error("Error al buscar ID en canvaceadores:", error);
+      try {
+        const resTec = await api.get('/tecnicos/');
+        const match = resTec.data.find(t => {
+          const uId_1 = typeof t.usuario_id === 'object' ? t.usuario_id?.id : t.usuario_id;
+          const numEmpleado = String(t.numero_empleado || '').toLowerCase().trim();
+          return Number(uId_1) === idUsuarioLogueado || numEmpleado === nombreCompleto;
+        });
+        if (match) idFinal = match.id;
+      } catch (error) { console.error("Error tecnicos:", error); }
     }
 
-    return null;
+    return { id: idFinal, rol: rolDetectado };
   };
 
   const isStepOptional = (step) => step === 1;
@@ -284,10 +292,10 @@ const NuevoProspect = ({ usuarioActual }) => {
     setGuardando(true);
     setErrorApi(null);
     try {
-      const idRealCanvaceador = await obtenerIDCanvaceadorBD();
+      // 🚀 AQUI USAMOS LA MAGIA DEL DOBLE BUSCADOR
+      const { id: idRealEmpleado, rol: rolEmpleado } = await obtenerIdYRolReal();
 
       const datosParaBackend = {
-        canvaceador_id: idRealCanvaceador,
         nombre_completo: formData.nombre_completo.trim(),
         telefono_whatsapp: formData.telefono_whatsapp,
         metodo_ubicacion: metodoUbicacion,
@@ -296,7 +304,11 @@ const NuevoProspect = ({ usuarioActual }) => {
         referencia_domicilio: formData.referencia_domicilio?.trim() || null,
         plan_interes: planInteres?.nombre || null,
         notas_canvaceador: formData.notas_canvaceador?.trim() || null,
-        estado: 'Nuevo'
+        estado: 'Nuevo',
+        
+        // 🚀 Si es canvaceador se va a uno, si es técnico se va al otro
+        canvaceador_id: rolEmpleado === 'canvaceador' ? idRealEmpleado : null,
+        tecnico_id: rolEmpleado === 'tecnico' ? idRealEmpleado : null
       };
 
       if (coordenadas && coordenadas.includes(',')) {
@@ -394,6 +406,7 @@ const NuevoProspect = ({ usuarioActual }) => {
       case 0:
         return (
           <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+
             <TextField
               label="Nombre Completo del Prospecto *" fullWidth size="small" required
               value={formData.nombre_completo} onChange={(e) => handleNombreChange(e.target.value)}
@@ -549,6 +562,7 @@ const NuevoProspect = ({ usuarioActual }) => {
                     case 0:
                       return (
                         <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+
                           <TextField
                             label="Nombre Completo del Prospecto *" fullWidth size="small" required
                             value={formData.nombre_completo} onChange={(e) => handleNombreChange(e.target.value)}

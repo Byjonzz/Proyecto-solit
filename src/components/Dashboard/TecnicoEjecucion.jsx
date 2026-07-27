@@ -62,7 +62,6 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
   const [vistaAdmin, setVistaAdmin] = useState(false);
   const [tecnicos, setTecnicos] = useState([]);
   
-  
   const [filtroEstatus, setFiltroEstatus] = useState('asignadas');
 
   useEffect(() => {
@@ -76,20 +75,29 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
       setLoading(true);
       setError('');
       
-      
-      
       const rol = usuarioActual?.rol?.toLowerCase().trim();
       const esAdmin = rol === 'admin' || rol === 'administrador' || rol === 'supervisor';
       
       setVistaAdmin(esAdmin);
       
+      try {
+        const tecnicosResponse = await api.get('/tecnicos/');
+        setTecnicos(tecnicosResponse.data);
+      } catch (err) {
+        console.warn("No se pudo cargar /tecnicos/, intentando /usuarios/...");
+        try {
+          const res2 = await api.get('/usuarios/');
+          const tecnicosFiltrados = res2.data.filter(u => u.rol && u.rol.toLowerCase() === 'tecnico');
+          setTecnicos(tecnicosFiltrados);
+        } catch (err2) {
+          console.error("Error al cargar técnicos:", err2);
+        }
+      }
       
       const contratosResponse = await api.get('/contratos/');
       const todosLosContratos = contratosResponse.data;
       
-      
       let contratosFiltrados = [];
-      
       
       const todosLosEstatus = [
         'Pendiente Asignar', 'Pendiente',
@@ -98,40 +106,27 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
       ];
       
       if (esAdmin) {
-        
         contratosFiltrados = todosLosContratos.filter(contrato => {
           const tieneTecnico = contrato.tecnico_id && contrato.tecnico_id !== null;
           const estatusValido = todosLosEstatus.includes(contrato.estatus);
           return tieneTecnico && estatusValido;
         });
-        
-        
-        
-        try {
-          const tecnicosResponse = await api.get('/tecnicos/');
-          setTecnicos(tecnicosResponse.data);
-        } catch (err) {
-        }
-        
       } else {
-        
         contratosFiltrados = todosLosContratos.filter(contrato => {
           const esMio = contrato.tecnico_id == usuarioActual?.perfil_id || contrato.tecnico_id == usuarioActual?.id;
           const estatusValido = todosLosEstatus.includes(contrato.estatus);
           return esMio && estatusValido;
         });
-        
       }
       
-      
-      
       const instalacionesFormateadas = contratosFiltrados.map(contrato => {
-        
         let tecnicoNombre = 'Sin asignar';
-        if (esAdmin && tecnicos.length > 0) {
+        if (contrato.tecnico_id) {
           const tecnico = tecnicos.find(t => t.id === contrato.tecnico_id);
           if (tecnico) {
-            tecnicoNombre = tecnico.numero_empleado || `Técnico #${tecnico.id}`;
+            tecnicoNombre = tecnico.numero_empleado || tecnico.nombre || tecnico.usuario || `Técnico #${tecnico.id}`;
+          } else {
+            tecnicoNombre = `Técnico ID: ${contrato.tecnico_id}`;
           }
         }
         
@@ -144,7 +139,7 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
           estado: contrato.estatus,
           fecha_programada: contrato.fecha_asignada || contrato.fecha_cita || null,
           hora_asignada: contrato.hora_asignada || null,
-          observaciones: contrato.observaciones || ''
+          observaciones: contrato.observaciones || contrato.nota || ''
         };
       });
       
@@ -157,7 +152,6 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
     }
   };
 
-  
   const getInstalacionesFiltradas = () => {
     switch (filtroEstatus) {
       case 'asignadas':
@@ -175,7 +169,6 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
     }
   };
 
-  
   const totalAsignadas = instalaciones.filter(i => 
     i.estado === 'Asignado' || i.estado === 'Programada' || 
     i.estado === 'Asignada' || i.estado === 'En Proceso' ||
@@ -186,12 +179,9 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
     i.estado === 'Completado' || i.estado === 'Completada'
   ).length;
 
-  
   const instalacionesFiltradas = getInstalacionesFiltradas();
 
   const handleEjecutar = (instalacion) => {
-    
-    
     if (instalacion.estado === 'Completado' || instalacion.estado === 'Completada') {
       setError('Esta instalación ya está completada');
       return;
@@ -228,7 +218,6 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
         return;
       }
 
-      
       await api.put(`/contratos/${instalacionSeleccionada.contrato_id}/`, {
         ...instalacionSeleccionada.contrato,
         estatus: 'Completado',
@@ -261,7 +250,7 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
 
   const getNombreTecnico = (tecnicoId) => {
     const tecnico = tecnicos.find(t => t.id === tecnicoId);
-    return tecnico ? (tecnico.numero_empleado || `Técnico #${tecnico.id}`) : 'Sin asignar';
+    return tecnico ? (tecnico.numero_empleado || tecnico.nombre || `Técnico #${tecnico.id}`) : 'Sin asignar';
   };
 
   if (loading) {
@@ -289,14 +278,12 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
       {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
 
-      {}
       {!vistaAdmin && (
         <Paper sx={{ mb: 3, p: 2, borderRadius: 2, border: '1px solid #e2e8f0' }}>
           <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 2, color: '#475569' }}>
             Filtrar por Estado:
           </Typography>
           <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap', gap: 1 }}>
-            {}
             <Button
               variant={filtroEstatus === 'asignadas' ? 'contained' : 'outlined'}
               startIcon={<AssignmentTurnedIn />}
@@ -317,7 +304,6 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
               Asignadas ({totalAsignadas})
             </Button>
             
-            {}
             <Button
               variant={filtroEstatus === 'completadas' ? 'contained' : 'outlined'}
               startIcon={<CheckCircle />}
@@ -352,7 +338,6 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
         </Button>
       </Stack>
 
-      {}
       {vistaAdmin ? (
         <TableContainer component={Paper}>
           <Table>
@@ -404,10 +389,20 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
                     </TableCell>
                     <TableCell>
                       {inst.fecha_programada ? (
-                        <Typography variant="body2">
-                          {inst.fecha_programada}
-                          {inst.hora_asignada && <br/>}
-                          {inst.hora_asignada && <span style={{color: '#64748b'}}>{inst.hora_asignada}</span>}
+                        <Typography variant="body2" sx={{ fontWeight: 600, color: '#1d4ed8' }}>
+                          {new Date(inst.fecha_programada).toLocaleDateString('es-MX', {
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric'
+                          })}
+                          {inst.hora_asignada && (
+                            <>
+                              <br/>
+                              <span style={{color: '#64748b', fontWeight: 400}}>
+                                {inst.hora_asignada}
+                              </span>
+                            </>
+                          )}
                         </Typography>
                       ) : (
                         <Typography variant="caption" color="text.secondary">Sin programar</Typography>
@@ -439,7 +434,6 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
           </Table>
         </TableContainer>
       ) : (
-        
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
           {instalacionesFiltradas.length === 0 ? (
             <Paper sx={{ p: 5, textAlign: 'center', width: '100%' }}>
@@ -494,9 +488,15 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
                     </Box>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <Schedule fontSize="small" color="action" />
-                      <Typography variant="body2">
-                         {inst.fecha_programada || 'Fecha por definir'}
-                        {inst.hora_asignada && `  ${inst.hora_asignada}`}
+                      <Typography variant="body2" sx={{ fontWeight: 600, color: '#1d4ed8' }}>
+                        {inst.fecha_programada 
+                          ? new Date(inst.fecha_programada).toLocaleDateString('es-MX', {
+                              year: 'numeric',
+                              month: 'long',
+                              day: 'numeric'
+                            })
+                          : 'Fecha por definir'}
+                        {inst.hora_asignada && ` - ${inst.hora_asignada}`}
                       </Typography>
                     </Box>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -505,6 +505,14 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
                         <strong>Plan:</strong> {inst.contrato?.plan_contratado}
                       </Typography>
                     </Box>
+                    {inst.tecnico_nombre && inst.tecnico_nombre !== 'Sin asignar' && (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Build fontSize="small" color="action" />
+                        <Typography variant="body2">
+                          <strong>Técnico:</strong> {inst.tecnico_nombre}
+                        </Typography>
+                      </Box>
+                    )}
                   </Stack>
 
                   {inst.observaciones && (
@@ -533,7 +541,6 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
         </Box>
       )}
 
-      {}
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -546,8 +553,14 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
             <Box sx={{ pt: 2 }}>
               <Alert severity="info" sx={{ mb: 2 }}>
                 <strong>Cliente:</strong> {instalacionSeleccionada.contrato?.nombre_completo}<br/>
-                <strong>Técnico:</strong> {vistaAdmin ? instalacionSeleccionada.tecnico_nombre : usuarioActual?.nombre}
-                <br/>
+                <strong>Técnico:</strong> {instalacionSeleccionada.tecnico_nombre}<br/>
+                <strong>Fecha Programada:</strong> {instalacionSeleccionada.fecha_programada 
+                  ? new Date(instalacionSeleccionada.fecha_programada).toLocaleDateString('es-MX', {
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric'
+                    })
+                  : 'Sin programar'}<br/>
                 <strong>Estado:</strong> {instalacionSeleccionada.estado}
               </Alert>
 
@@ -588,12 +601,13 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
                   <TextField
                     fullWidth
                     label="Fecha/Hora"
-                    value={`${instalacionSeleccionada.fecha_programada || 'N/A'} ${instalacionSeleccionada.hora_asignada || ''}`}
+                    value={`${instalacionSeleccionada.fecha_programada 
+                      ? new Date(instalacionSeleccionada.fecha_programada).toLocaleDateString('es-MX')
+                      : 'N/A'} ${instalacionSeleccionada.hora_asignada || ''}`}
                     InputProps={{ readOnly: true }}
                   />
                 </Box>
 
-                {}
                 {!vistaAdmin && instalacionSeleccionada.estado !== 'Completado' && instalacionSeleccionada.estado !== 'Completada' && (
                   <>
                     <Divider sx={{ my: 1 }} />
@@ -665,7 +679,6 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
                   </>
                 )}
                 
-                {}
                 {(instalacionSeleccionada.estado === 'Completado' || instalacionSeleccionada.estado === 'Completada') && (
                   <Alert severity="success" sx={{ mt: 2 }}>
                     Esta instalación ya fue completada

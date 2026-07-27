@@ -32,7 +32,6 @@ export const useContratos = () => {
     }
   };
 
-  
   const fetchByTecnico = async (tecnicoId) => {
     try {
       setLoading(true);
@@ -68,6 +67,8 @@ export const useContratos = () => {
     }
   };
 
+  const actualizarContrato = updateContrato;
+
   const asignarCita = async (id, data) => {
     try {
       const contratoActualizado = await contratosService.asignarCita(id, data);
@@ -79,7 +80,6 @@ export const useContratos = () => {
     }
   };
 
-  
   const completarInstalacion = async (id, data) => {
     try {
       const contratoActualizado = await contratosService.patch(id, {
@@ -114,6 +114,7 @@ export const useContratos = () => {
     error,
     createContrato,
     updateContrato,
+    actualizarContrato, 
     asignarCita,
     completarInstalacion,
     deleteContrato,

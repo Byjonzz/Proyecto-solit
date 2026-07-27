@@ -113,7 +113,7 @@ const Sidebar = ({ currentView, setCurrentView, mobileOpen, handleDrawerToggle, 
             </Typography>
           </Box>
           <Typography variant="h6" noWrap sx={{ fontWeight: 800, color: 'white' }}>
-            SolitConect
+            SolitConnect
           </Typography>
         </Box>
         {isMobile && (

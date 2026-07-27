@@ -27,7 +27,7 @@ const iconPunto = createCustomIcon('#3b82f6');
 const iconDestino = createCustomIcon('#f43f5e');
 
 const API_RUTAS_URL = '/rutas_canvaceadores/';
-const API_USUARIOS_URL = '/usuarios/';
+const API_CANVACEADORES_URL = '/canvaceadores/'; 
 
 const AsignacionRutas = () => {
   const [canvaceadorId, setCanvaceadorId] = useState('');
@@ -57,18 +57,16 @@ const AsignacionRutas = () => {
 
   const cargarDatosIniciales = async () => {
     try {
-      const responseUsuarios = await api.get(API_USUARIOS_URL);
-      const canvaceadoresFiltrados = responseUsuarios.data
-        .filter(usuario => usuario.rol && usuario.rol.toLowerCase() === 'canvaceador')
-        .map(usuario => ({
-          id: usuario.id,
-          nombre: `${usuario.nombre} ${usuario.apellido || ''}`.trim()
-        }));
-      setCanvaceadoresDisponibles(canvaceadoresFiltrados);
+      const responseCanvaceadores = await api.get(API_CANVACEADORES_URL);
+      const canvaceadoresReales = responseCanvaceadores.data.map(canv => ({
+        id: canv.id, 
+        nombre: canv.numero_empleado || canv.usuario || `Canvaceador #${canv.id}`
+      }));
+      setCanvaceadoresDisponibles(canvaceadoresReales);
 
       const responseRutas = await api.get(API_RUTAS_URL);
       const rutasFormateadas = responseRutas.data.map(ruta => {
-        const canv = canvaceadoresFiltrados.find(c => c.id === (ruta.canvaceador || ruta.canvaceador_id));
+        const canv = canvaceadoresReales.find(c => c.id === (ruta.canvaceador || ruta.canvaceador_id));
         let puntosMarcados = ruta.camino_trazado?.includes('LINESTRING') ? ruta.camino_trazado.split(',').length : 0;
         return {
           id: ruta.id,
@@ -244,11 +242,12 @@ const AsignacionRutas = () => {
       modo_trazado: 'Peatonal',
       estado: 'En Progreso',
       camino_trazado: wktLineString,
-      canvaceador_id: parseInt(canvaceadorId)
+      canvaceador_id: parseInt(canvaceadorId) 
     };
 
     try {
       await api.post(API_RUTAS_URL, payload);
+      alert("✅ Ruta guardada y asignada correctamente."); 
       cargarDatosIniciales();
       setCanvaceadorId('');
       setInputValue('');
@@ -257,8 +256,12 @@ const AsignacionRutas = () => {
       setLimiteColonia(null);
       limpiarMapa();
     } catch (error) {
-      const errorData = error.response ? error.response.data : error.message;
-      alert(`❌ Error al guardar.\nMotivo:\n${JSON.stringify(errorData, null, 2)}`);
+      if (error.response && error.response.data) {
+         alert(`❌ Django rechazó la ruta por esto:\n${JSON.stringify(error.response.data, null, 2)}`);
+         console.error("Error exacto del backend:", error.response.data);
+      } else {
+         alert(`❌ Error de conexión: ${error.message}`);
+      }
     }
   };
 

@@ -16,7 +16,6 @@ import TecnicoEjecucion from './components/Dashboard/TecnicoEjecucion';
 import Comisiones from './components/Dashboard/Comisiones';
 import AsignacionRutas from './components/Dashboard/AsignacionRutas';
 import VentaChips from './components/Ventas/VentaChips';
-
 import AsistenteFlotante from './components/AsistenteFlotante'; 
 
 const drawerWidth = 260;
@@ -171,7 +170,7 @@ function App() {
             <MenuIcon />
           </IconButton>
           <Typography variant="h6" noWrap component="div" sx={{ fontWeight: 700 }}>
-            SolitConect
+            SolitConnect
           </Typography>
         </Toolbar>
       </AppBar>

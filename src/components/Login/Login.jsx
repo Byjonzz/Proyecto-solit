@@ -123,7 +123,7 @@ const Login = ({ onLoginSuccess, loginFunction }) => {
               letterSpacing: '-0.5px'
             }}
           >
-            SolitConect
+            SolitConnect
           </Typography>
           <Typography variant="body1" sx={{ color: '#6a6e73', fontWeight: 500, fontSize: '1rem' }}>
             Portal de Canvaceadores
