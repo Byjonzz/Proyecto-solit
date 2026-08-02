@@ -1,6 +1,4 @@
-import React, { useState } from 'react';
-import axios from 'axios';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useProspectos } from '../../hooks/useProspectos';
 import {
   Box,
@@ -24,16 +22,34 @@ import {
   Stack,
   Divider,
   Alert,
-  CircularProgress
+  CircularProgress,
+  MenuItem
 } from '@mui/material';
 
-import { Visibility, WhatsApp, Phone, AssignmentTurnedIn } from '@mui/icons-material';
+import {
+  WhatsApp, Phone, AssignmentTurnedIn, Close, Verified, Cancel,
+  Pending, ListAlt
+} from '@mui/icons-material';
 import api from '../../services/api';
+import { clientesService } from '../../services/clientesService';
+import { extraerCoordenadas } from '../../utils/geo';
+import { soloMisRegistros } from '../../utils/propiedad';
+import PlanCotizacion from './PlanCotizacion';
+
+const ETAPAS_EMBUDO = ['Nuevo', 'Posible Cliente', 'Prospecto', 'Contactado', 'Interesado', 'Perdido'];
+const ESTADO_VENDIDO = 'Vendido';
+const ESTADO_PERDIDO = 'Perdido';
+const FILTROS = [
+  { value: 'activos', label: 'Activos', icono: Pending, color: '#f59e0b', colorHover: '#d97706' },
+  { value: 'perdidos', label: 'Perdidos', icono: Cancel, color: '#ef4444', colorHover: '#dc2626' },
+  { value: 'clientes', label: 'Ya son Clientes', icono: Verified, color: '#10b981', colorHover: '#059669' },
+  { value: 'todos', label: 'Todos', icono: ListAlt, color: '#64748b', colorHover: '#475569' }
+];
 
 const SegumientoProspecto = ({ usuarioActual }) => {
-  const navigate = useNavigate();
+  // El hook ya pide al servidor solo los prospectos de este usuario.
+  const { prospectos, loading, error, updateEstadoProspecto } = useProspectos(usuarioActual);
 
-  const { prospectos, loading, error } = useProspectos();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [prospectoSeleccionado, setProspectoSeleccionado] = useState(null);
 
@@ -41,6 +57,28 @@ const SegumientoProspecto = ({ usuarioActual }) => {
   const [notas, setNotas] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [mensaje, setMensaje] = useState(null);
+  const [filtro, setFiltro] = useState('activos');
+
+  const [contratoOpen, setContratoOpen] = useState(false);
+  const [prospectoContrato, setProspectoContrato] = useState(null);
+  const [avisoContrato, setAvisoContrato] = useState(null);
+
+  const [idsConCliente, setIdsConCliente] = useState(new Set());
+
+  useEffect(() => {
+    let montado = true;
+    clientesService.getAll()
+      .then(data => {
+        if (!montado || !Array.isArray(data)) return;
+        const ids = data
+          .map(c => (typeof c.prospecto_id === 'object' ? c.prospecto_id?.id : c.prospecto_id))
+          .filter(id => id != null)
+          .map(Number);
+        setIdsConCliente(new Set(ids));
+      })
+      .catch(err => console.warn('No se pudo cargar la lista de clientes:', err?.message));
+    return () => { montado = false; };
+  }, []);
 
   const handleView = (prospecto) => {
     setProspectoSeleccionado(prospecto);
@@ -50,40 +88,94 @@ const SegumientoProspecto = ({ usuarioActual }) => {
     setDialogOpen(true);
   };
 
+  const esCliente = (prospecto) =>
+    prospecto.estado === ESTADO_VENDIDO || idsConCliente.has(Number(prospecto.id));
+
+  // Cada quien ve solo lo que capturó; logística y administración ven todo.
+  const prospectosDelUsuario = useMemo(
+    () => soloMisRegistros(prospectos, usuarioActual),
+    [prospectos, usuarioActual]
+  );
+
+  const conteos = useMemo(() => {
+    const clientes = prospectosDelUsuario.filter(esCliente);
+    const perdidos = prospectosDelUsuario.filter(p => p.estado === ESTADO_PERDIDO && !esCliente(p));
+    const activos = prospectosDelUsuario.filter(p => !esCliente(p) && p.estado !== ESTADO_PERDIDO);
+    return {
+      activos: activos.length,
+      perdidos: perdidos.length,
+      clientes: clientes.length,
+      todos: prospectosDelUsuario.length,
+      listas: { activos, perdidos, clientes, todos: prospectosDelUsuario }
+    };
+  }, [prospectosDelUsuario, idsConCliente]);
+
+  const prospectosFiltrados = conteos.listas[filtro] || [];
+
   const handleGenerarContrato = (prospecto) => {
-    const direccionCompleta = [prospecto.direccion_calle_numero, prospecto.direccion_colonia]
-      .filter(Boolean)
-      .join(', ');
-
-    let coordenadasLimpias = '';
-    if (prospecto.ubicacion_gps && prospecto.ubicacion_gps.includes('POINT')) {
-      const puntos = prospecto.ubicacion_gps.replace('POINT(', '').replace(')', '').split(' ');
-      if (puntos.length === 2) {
-        coordenadasLimpias = `${puntos[1]}, ${puntos[0]}`; 
-      }
-    }
-
-    navigate('/contratos', {
-      state: {
-        datosDesdeProspecto: {
-          nombre: prospecto.nombre_completo || '',
-          telefono1: prospecto.telefono_whatsapp || '',
-          calleNumero: direccionCompleta || '',
-          referencias: prospecto.referencia_domicilio || '',
-          plan: prospecto.plan_interes ? { nombre: prospecto.plan_interes } : null,
-          coordenadasGPS: coordenadasLimpias
-        }
-      }
-    });
+    setProspectoContrato(prospecto);
+    setAvisoContrato(null);
+    setContratoOpen(true);
   };
 
-  const prospectosFiltrados = prospectos.filter(prospecto => {
-    const rol = usuarioActual?.rol?.toLowerCase() || '';
-    if (rol === 'canvaceador') {
-      return prospecto.canvaceador_id === Number(usuarioActual?.perfil_id);
+  const datosParaContrato = useMemo(() => {
+    if (!prospectoContrato) return null;
+
+    const direccionCompleta = [
+      prospectoContrato.direccion_calle_numero,
+      prospectoContrato.direccion_colonia
+    ].filter(Boolean).join(', ');
+
+    const { texto, lat, lng } = extraerCoordenadas(prospectoContrato.ubicacion_gps);
+
+    return {
+      nombre: prospectoContrato.nombre_completo || '',
+      telefono1: prospectoContrato.telefono_whatsapp || '',
+      calleNumero: direccionCompleta,
+      referencias: prospectoContrato.referencia_domicilio || '',
+      planNombre: prospectoContrato.plan_interes || null,
+      coordenadasGPS: texto,
+      lat,
+      lng
+    };
+  }, [prospectoContrato]);
+
+  const handleContratoCreado = async () => {
+    const prospecto = prospectoContrato;
+    setAvisoContrato({
+      tipo: 'success',
+      texto: `Contrato de ${prospecto?.nombre_completo || 'el prospecto'} guardado. Aparecerá en Agenda de Instalaciones.`
+    });
+    if (prospecto?.id) {
+      try {
+        await updateEstadoProspecto(prospecto.id, ESTADO_VENDIDO);
+      } catch (err) {
+        console.error('Contrato creado pero no se pudo actualizar el estado:', err);
+        setAvisoContrato({
+          tipo: 'warning',
+          texto: 'El contrato se guardó, pero no se pudo marcar el prospecto como Vendido. Cámbialo a mano desde el seguimiento.'
+        });
+      }
     }
-    return true;
-  });
+
+    setContratoOpen(false);
+    setProspectoContrato(null);
+  };
+
+  const handleCambiarEstado = async (nuevoEstado) => {
+    if (!prospectoSeleccionado || nuevoEstado === prospectoSeleccionado.estado) return;
+    setEnviando(true);
+    setMensaje(null);
+    try {
+      const actualizado = await updateEstadoProspecto(prospectoSeleccionado.id, nuevoEstado);
+      setProspectoSeleccionado(actualizado);
+      setMensaje({ tipo: 'success', texto: `Estado cambiado a "${nuevoEstado}".` });
+    } catch (err) {
+      console.error('Error al cambiar el estado:', err);
+      setMensaje({ tipo: 'error', texto: 'No se pudo cambiar el estado. Verifica tu conexión.' });
+    }
+    setEnviando(false);
+  };
 
   const handleGuardarSeguimiento = async () => {
     if (!tipoInteraccion || !notas.trim()) {
@@ -115,6 +207,8 @@ const SegumientoProspecto = ({ usuarioActual }) => {
   const getEstadoColor = (estado) => {
     const colores = {
       'Nuevo': 'primary',
+      'Posible Cliente': 'success',
+      'Prospecto': 'warning',
       'Contactado': 'info',
       'Interesado': 'warning',
       'Vendido': 'success',
@@ -157,79 +251,164 @@ const SegumientoProspecto = ({ usuarioActual }) => {
   }
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h5" sx={{ fontWeight: 700, mb: 3 }}>
-        Seguimiento de Prospectos ({prospectosFiltrados.length})
-      </Typography>
+    <Box sx={{ p: 3, display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <Box>
+        <Typography variant="h5" sx={{ fontWeight: 700, mb: 0.5 }}>
+          Seguimiento de Prospectos
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          Da seguimiento a tus prospectos y convierte en contrato a los que ya se animaron.
+        </Typography>
+      </Box>
 
-      <TableContainer component={Paper}>
+      {avisoContrato && (
+        <Alert severity={avisoContrato.tipo} onClose={() => setAvisoContrato(null)} sx={{ borderRadius: 2 }}>
+          {avisoContrato.texto}
+        </Alert>
+      )}
+
+      <Paper sx={{ p: 2, borderRadius: 2, border: '1px solid #e2e8f0' }}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 2, color: '#475569' }}>
+          Filtrar por Estatus:
+        </Typography>
+        <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap', gap: 1 }}>
+          {FILTROS.map(({ value, label, icono: Icono, color, colorHover }) => {
+            const activo = filtro === value;
+            return (
+              <Button
+                key={value}
+                variant={activo ? 'contained' : 'outlined'}
+                startIcon={<Icono />}
+                onClick={() => setFiltro(value)}
+                sx={{
+                  minWidth: 160,
+                  bgcolor: activo ? color : 'transparent',
+                  color: activo ? 'white' : color,
+                  borderColor: color, borderWidth: 2, fontWeight: 700,
+                  '&:hover': {
+                    bgcolor: activo ? colorHover : `${color}14`,
+                    borderColor: colorHover
+                  }
+                }}
+              >
+                {label} ({conteos[value]})
+              </Button>
+            );
+          })}
+        </Stack>
+      </Paper>
+
+      <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2 }}>
         <Table>
-          <TableHead sx={{ backgroundColor: '#f5f5f5' }}>
+          <TableHead sx={{ backgroundColor: '#f8fafc' }}>
             <TableRow>
-              <TableCell sx={{ fontWeight: 700 }}>Nombre</TableCell>
-              <TableCell sx={{ fontWeight: 700 }}>Teléfono</TableCell>
-              <TableCell sx={{ fontWeight: 700 }}>Dirección</TableCell>
-              <TableCell sx={{ fontWeight: 700 }}>Estado</TableCell>
-              <TableCell sx={{ fontWeight: 700 }}>Fecha</TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700 }}>Acciones</TableCell>
+              <TableCell sx={{ fontWeight: 600 }}>Folio</TableCell>
+              <TableCell sx={{ fontWeight: 600 }}>Prospecto</TableCell>
+              <TableCell sx={{ fontWeight: 600 }}>Teléfono</TableCell>
+              <TableCell sx={{ fontWeight: 600 }}>Dirección</TableCell>
+              <TableCell sx={{ fontWeight: 600 }}>Plan de Interés</TableCell>
+              <TableCell sx={{ fontWeight: 600 }}>Fecha de Captura</TableCell>
+              <TableCell sx={{ fontWeight: 600 }}>Estatus</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 600 }}>Acción</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {prospectosFiltrados.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} align="center">
-                  <Typography sx={{ py: 3, color: 'text.secondary' }}>
-                    No tienes prospectos registrados.
+                <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
+                  <Typography variant="body2" color="text.secondary">
+                    {filtro === 'activos' ? 'No tienes prospectos activos por atender'
+                      : filtro === 'perdidos' ? 'No hay prospectos marcados como perdidos'
+                      : filtro === 'clientes' ? 'Todavía no hay prospectos convertidos en clientes'
+                      : 'No tienes prospectos registrados'}
                   </Typography>
                 </TableCell>
               </TableRow>
             ) : (
-              prospectosFiltrados.map((prospecto) => (
-                <TableRow key={prospecto.id} hover>
-                  <TableCell>{prospecto.nombre_completo || 'Sin nombre'}</TableCell>
-                  <TableCell>{prospecto.telefono_whatsapp || 'Sin teléfono'}</TableCell>
-                  <TableCell>
-                    {prospecto.direccion_calle_numero
-                      ? `${prospecto.direccion_calle_numero}, ${prospecto.direccion_colonia || ''}`
-                      : 'Sin dirección'
-                    }
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      label={prospecto.estado || 'Nuevo'}
-                      color={getEstadoColor(prospecto.estado)}
-                      size="small"
-                    />
-                  </TableCell>
-                  <TableCell>{formatDate(prospecto.fecha_captura)}</TableCell>
-
-                  <TableCell align="center">
-                    <Stack direction="row" spacing={1} justifyContent="center">
-                      <Tooltip title="Registrar Seguimiento">
-                        <IconButton
+              prospectosFiltrados.map((prospecto) => {
+                const yaEsCliente = esCliente(prospecto);
+                return (
+                  <TableRow key={prospecto.id} hover>
+                    <TableCell sx={{ fontWeight: 700, color: '#1d4ed8' }}>{prospecto.id}</TableCell>
+                    <TableCell sx={{ fontWeight: 600 }}>
+                      {prospecto.nombre_completo || 'Sin nombre'}
+                    </TableCell>
+                    <TableCell>
+                      {prospecto.telefono_whatsapp || (
+                        <Typography variant="caption" color="text.secondary">Sin teléfono</Typography>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {prospecto.direccion_calle_numero
+                        ? [prospecto.direccion_calle_numero, prospecto.direccion_colonia].filter(Boolean).join(', ')
+                        : <Typography variant="caption" color="text.secondary">Sin dirección</Typography>
+                      }
+                    </TableCell>
+                    <TableCell>
+                      {prospecto.plan_interes || (
+                        <Typography variant="caption" color="text.secondary">Sin definir</Typography>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {prospecto.fecha_captura ? (
+                        <Typography variant="body2" sx={{ fontWeight: 600, color: '#475569' }}>
+                          {formatDate(prospecto.fecha_captura)}
+                        </Typography>
+                      ) : (
+                        <Typography variant="caption" color="text.secondary">Sin fecha</Typography>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Stack direction="row" spacing={0.5} alignItems="center">
+                        <Chip
+                          label={prospecto.estado || 'Nuevo'}
+                          color={getEstadoColor(prospecto.estado)}
                           size="small"
-                          color="success"
+                          sx={{ fontWeight: 600 }}
+                        />
+                        {idsConCliente.has(Number(prospecto.id)) && prospecto.estado !== ESTADO_VENDIDO && (
+                          <Tooltip title="Ya existe como cliente">
+                            <Verified sx={{ fontSize: 18, color: '#10b981' }} />
+                          </Tooltip>
+                        )}
+                      </Stack>
+                    </TableCell>
+
+                    <TableCell align="center">
+                      <Stack direction="row" spacing={1} justifyContent="center">
+                        <Button
+                          variant="outlined" size="small" startIcon={<Phone />}
                           onClick={() => handleView(prospecto)}
+                          sx={{
+                            textTransform: 'none', borderRadius: 1.5, color: '#3b82f6', borderColor: '#3b82f6',
+                            '&:hover': { borderColor: '#2563eb', backgroundColor: 'rgba(59, 130, 246, 0.04)' }
+                          }}
                         >
-                          <Phone />
-                        </IconButton>
-                      </Tooltip>
+                          Seguimiento
+                        </Button>
 
-                      {/* 🚀 NUEVO BOTÓN: GENERAR CONTRATO DIRECTO */}
-                      <Tooltip title="Generar Contrato">
-                        <IconButton
-                          size="small"
-                          color="primary"
-                          onClick={() => handleGenerarContrato(prospecto)}
-                        >
-                          <AssignmentTurnedIn />
-                        </IconButton>
-                      </Tooltip>
-                    </Stack>
-                  </TableCell>
+                        {yaEsCliente ? (
+                          <Button
+                            variant="contained" size="small" disabled startIcon={<Verified />}
+                            sx={{ textTransform: 'none', borderRadius: 1.5 }}
+                          >
+                            Ya es Cliente
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="contained" size="small"
+                            onClick={() => handleGenerarContrato(prospecto)}
+                            sx={{ textTransform: 'none', borderRadius: 1.5 }}
+                          >
+                            Generar Contrato
+                          </Button>
+                        )}
+                      </Stack>
+                    </TableCell>
 
-                </TableRow>
-              ))
+                  </TableRow>
+                );
+              })
             )}
           </TableBody>
         </Table>
@@ -249,6 +428,43 @@ const SegumientoProspecto = ({ usuarioActual }) => {
               <Typography variant="body2"><strong>Teléfono:</strong> {prospectoSeleccionado.telefono_whatsapp}</Typography>
               <Typography variant="body2"><strong>Dirección:</strong> {prospectoSeleccionado.direccion_calle_numero}, {prospectoSeleccionado.direccion_colonia}</Typography>
               <Typography variant="body2"><strong>Interés:</strong> {prospectoSeleccionado.plan_interes || 'N/A'}</Typography>
+
+              <Divider sx={{ my: 2 }} />
+
+              <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1.5, color: '#1e293b' }}>
+                Etapa del Prospecto
+              </Typography>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }}>
+                <TextField
+                  select
+                  label="Estado"
+                  size="small"
+                  fullWidth
+                  value={ETAPAS_EMBUDO.includes(prospectoSeleccionado.estado) ? prospectoSeleccionado.estado : ''}
+                  onChange={(e) => handleCambiarEstado(e.target.value)}
+                  disabled={enviando || esCliente(prospectoSeleccionado)}
+                  helperText={
+                    esCliente(prospectoSeleccionado)
+                      ? 'Ya es cliente: la etapa no se modifica'
+                      : 'Mueve el prospecto en el embudo'
+                  }
+                >
+                  {ETAPAS_EMBUDO.map(etapa => (
+                    <MenuItem key={etapa} value={etapa}>{etapa}</MenuItem>
+                  ))}
+                </TextField>
+
+                <Button
+                  variant="outlined"
+                  color="error"
+                  startIcon={<Cancel />}
+                  onClick={() => handleCambiarEstado(ESTADO_PERDIDO)}
+                  disabled={enviando || esCliente(prospectoSeleccionado) || prospectoSeleccionado.estado === ESTADO_PERDIDO}
+                  sx={{ whiteSpace: 'nowrap', textTransform: 'none', minWidth: 180 }}
+                >
+                  Marcar como Perdido
+                </Button>
+              </Stack>
 
               <Divider sx={{ my: 2 }} />
 
@@ -307,8 +523,60 @@ const SegumientoProspecto = ({ usuarioActual }) => {
           )}
         </DialogContent>
         <DialogActions sx={{ p: 2, borderTop: '1px solid #e2e8f0' }}>
+          {prospectoSeleccionado && !esCliente(prospectoSeleccionado) && (
+            <Button
+              variant="contained"
+              color="primary"
+              startIcon={<AssignmentTurnedIn />}
+              onClick={() => {
+                setDialogOpen(false);
+                handleGenerarContrato(prospectoSeleccionado);
+              }}
+              sx={{ textTransform: 'none', mr: 'auto' }}
+            >
+              Se animó: Generar Contrato
+            </Button>
+          )}
           <Button onClick={() => setDialogOpen(false)} color="inherit">Cerrar</Button>
         </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={contratoOpen}
+        onClose={() => setContratoOpen(false)}
+        fullWidth
+        maxWidth="md"
+        PaperProps={{ sx: { borderRadius: 3 } }}
+      >
+        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 700, gap: 1 }}>
+          <Box>
+            Nuevo Contrato
+            {prospectoContrato && (
+              <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 400 }}>
+                Datos precargados de {prospectoContrato.nombre_completo}
+              </Typography>
+            )}
+          </Box>
+          <IconButton onClick={() => setContratoOpen(false)}><Close /></IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          {contratoOpen && (
+            <>
+              <Alert severity="info" sx={{ mb: 2 }}>
+                Se reutilizaron nombre, teléfono, dirección y ubicación del prospecto.
+                Faltan los datos que el contrato exige y el prospecto no tiene:
+                <strong> INE, correo, evidencias y firma</strong>.
+              </Alert>
+
+              <PlanCotizacion
+                usuarioActual={usuarioActual}
+                datosDesdeProspecto={datosParaContrato}
+                enModal
+                onContratoCreado={handleContratoCreado}
+              />
+            </>
+          )}
+        </DialogContent>
       </Dialog>
     </Box>
   );

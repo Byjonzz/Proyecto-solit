@@ -1,21 +1,27 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box, Stepper, Step, StepLabel, StepContent, Button, Paper,
   Typography, TextField, Radio, RadioGroup, FormControlLabel,
   FormControl, FormLabel, InputAdornment, IconButton, Tooltip,
-  CircularProgress, Alert, Card, CardContent, Grid, Divider, Chip
+  CircularProgress, Alert, Card, CardContent, Grid, Divider, Chip,
+  Dialog, DialogTitle, DialogContent, DialogActions, List, ListItem, ListItemText
 } from '@mui/material';
 import {
   MyLocation, ContentCopy, CheckCircle, WhatsApp,
-  Download, Upload, Wifi, AccountCircle
+  Download, Upload, Wifi, CloudDone, WifiOff, Place, PersonPin,
+  FactCheck, HelpOutlined
 } from '@mui/icons-material';
 
-import { MapContainer, TileLayer, CircleMarker, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, CircleMarker, GeoJSON, useMap, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import api from '../../services/api';
 
+import { obtenerDireccion } from '../../services/geocodeService';
 import { useProspectos } from '../../hooks/useProspectos';
 import { usePlanes } from '../../hooks/usePlanes';
+import {
+  validarNombrePersona, validarTelefonoMx, validarDireccion, validarTextoLibre
+} from '../../utils/validaciones';
 
 const pasos = [
   { label: 'Información Básica del Prospecto', description: 'Registra los datos de contacto iniciales.' },
@@ -30,6 +36,16 @@ const ClicEnMapa = ({ alHacerClic }) => {
       alHacerClic(e.latlng.lat, e.latlng.lng);
     },
   });
+  return null;
+};
+
+
+const AjustarTamanoMapa = () => {
+  const map = useMap();
+  useEffect(() => {
+    const timers = [150, 450, 800].map(ms => setTimeout(() => map.invalidateSize(), ms));
+    return () => timers.forEach(clearTimeout);
+  }, [map]);
   return null;
 };
 
@@ -106,7 +122,7 @@ const SeleccionPlanesCanvaceo = ({ planSeleccionado, onPlanSeleccionado, planesF
   }, [categoriasDisponibles]);
 
   if (categoriasDisponibles.length === 0) {
-    return <Alert severity="info" sx={{ my: 2 }}>No hay planes disponibles. Por favor, crea planes en el módulo de Administración.</Alert>;
+    return <Alert severity="info" sx={{ my: 2 }}>No hay planes disponibles en la memoria. Necesitas conexión para descargarlos la primera vez.</Alert>;
   }
 
   const categoriaActual = categoriasDisponibles.find(c => c.value === categoria);
@@ -129,7 +145,7 @@ const SeleccionPlanesCanvaceo = ({ planSeleccionado, onPlanSeleccionado, planesF
           ) : (
             <Grid container spacing={2}>
               {categoriaActual.planes.map((plan) => (
-                <Grid size={{ xs: 12, sm: 4 }} key={plan.id}>
+                <Grid item xs={12} sm={4} key={plan.id}>
                   <TarjetaPlanCanvaceo plan={plan} seleccionado={planSeleccionado?.id === plan.id} onSelect={handleSeleccionar} />
                 </Grid>
               ))}
@@ -151,11 +167,17 @@ const SeleccionPlanesCanvaceo = ({ planSeleccionado, onPlanSeleccionado, planesF
     </Box>
   );
 };
-
-const NuevoProspect = ({ usuarioActual }) => {
+const NuevoProspect = ({
+  usuarioActual,
+  enModal = false,
+  ubicacionInicial = null,
+  verificarCobertura = null,
+  poligonoCobertura = null,
+  onFinalizar = null
+}) => {
   const [activeStep, setActiveStep] = useState(0);
   const [skipped, setSkipped] = useState(new Set());
-  const [metodoUbicacion, setMetodoUbicacion] = useState('manual');
+  const [metodoUbicacion, setMetodoUbicacion] = useState(ubicacionInicial ? 'mapa' : 'manual');
 
   const [loadingGps, setLoadingGps] = useState(false);
   const [loadingGeocode, setLoadingGeocode] = useState(false);
@@ -166,13 +188,37 @@ const NuevoProspect = ({ usuarioActual }) => {
   const [errorApi, setErrorApi] = useState(null);
   const [guardando, setGuardando] = useState(false);
 
+
+  const [dentroCobertura, setDentroCobertura] = useState(null);
+  const [resultadoGuardado, setResultadoGuardado] = useState(null);
+
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [pendientesOffline, setPendientesOffline] = useState(0);
+  const [alertaOffline, setAlertaOffline] = useState(null);
+
+  // Diálogo de resumen y confirmación previo al guardado.
+  const [confirmacionAbierta, setConfirmacionAbierta] = useState(false);
+  // Falla del servicio de mapas al traducir coordenadas.
+  const [errorGeocode, setErrorGeocode] = useState(null);
+
   const [erroresValidacion, setErroresValidacion] = useState({
     nombre: false, nombreMensaje: '',
-    telefono: false, telefonoMensaje: ''
+    telefono: false, telefonoMensaje: '',
+    direccionMensaje: '',
+    notasMensaje: ''
   });
 
   const { createProspecto } = useProspectos();
-  const { planesFibraSimetrica, planesFibraAsimetrica, planesSolitTV, planesHibridos, planesAntenaWireless, loading: loadingPlanes } = usePlanes();
+  const {
+    planesFibraSimetrica, planesFibraAsimetrica, planesSolitTV,
+    planesHibridos, planesAntenaWireless, loading: loadingPlanesOriginal
+  } = usePlanes();
+
+  // CACHÉ LOCAL DE PLANES
+  const [planesCache, setPlanesCache] = useState({
+    simetrica: [], asimetrica: [], tv: [], hibridos: [], wireless: []
+  });
+  const [cargandoPlanes, setCargandoPlanes] = useState(true);
 
   const [formData, setFormData] = useState({
     nombre_completo: '',
@@ -183,7 +229,113 @@ const NuevoProspect = ({ usuarioActual }) => {
     notas_canvaceador: ''
   });
 
-  // 🚀 LA NUEVA FUNCIÓN MÁGICA "DOBLE BUSCADOR" (TÉCNICOS Y CANVACEADORES)
+  const estadoFinal =
+    dentroCobertura === true ? 'Posible Cliente'
+      : dentroCobertura === false ? 'Prospecto'
+        : 'Nuevo';
+
+  useEffect(() => {
+    const cacheLocal = JSON.parse(localStorage.getItem('planes_canvaceo_offline'));
+    const hayPlanesNuevos = planesFibraSimetrica.length > 0 || planesFibraAsimetrica.length > 0 || planesSolitTV.length > 0 || planesHibridos.length > 0 || planesAntenaWireless.length > 0;
+
+    if (hayPlanesNuevos) {
+      const objPlanes = {
+        simetrica: planesFibraSimetrica,
+        asimetrica: planesFibraAsimetrica,
+        tv: planesSolitTV,
+        hibridos: planesHibridos,
+        wireless: planesAntenaWireless
+      };
+      localStorage.setItem('planes_canvaceo_offline', JSON.stringify(objPlanes));
+      setPlanesCache(objPlanes);
+      setCargandoPlanes(false);
+    } else if (!isOnline && cacheLocal) {
+      setPlanesCache(cacheLocal);
+      setCargandoPlanes(false);
+    } else if (!loadingPlanesOriginal) {
+      setCargandoPlanes(false);
+    }
+  }, [planesFibraSimetrica, planesFibraAsimetrica, planesSolitTV, planesHibridos, planesAntenaWireless, loadingPlanesOriginal, isOnline]);
+
+  // MONITOR OFFLINE/ONLINE
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      sincronizarPendientes();
+    };
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    revisarPendientes();
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (ubicacionInicial && ubicacionInicial.lat != null && ubicacionInicial.lng != null) {
+      const { lat, lng } = ubicacionInicial;
+      setCoordenadas(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+      consultarDireccionHumana(lat, lng);
+    }
+  }, []);
+  useEffect(() => {
+    if (typeof verificarCobertura !== 'function' || !coordenadas.includes(',')) {
+      setDentroCobertura(null);
+      return;
+    }
+    const partes = coordenadas.split(',');
+    const lat = parseFloat(partes[0].trim());
+    const lng = parseFloat(partes[1].trim());
+    if (isNaN(lat) || isNaN(lng)) {
+      setDentroCobertura(null);
+      return;
+    }
+    setDentroCobertura(verificarCobertura(lat, lng));
+  }, [coordenadas, verificarCobertura]);
+
+  const revisarPendientes = () => {
+    const p = JSON.parse(localStorage.getItem('prospectos_offline')) || [];
+    setPendientesOffline(p.length);
+  };
+
+  const sincronizarPendientes = async () => {
+    const p = JSON.parse(localStorage.getItem('prospectos_offline')) || [];
+    if (p.length === 0) return;
+
+    let restantes = [...p];
+    let enviados = 0;
+
+    for (const item of p) {
+      try {
+        await api.post('/prospectos/', item);
+        restantes = restantes.filter(x => x.id_local !== item.id_local);
+        enviados++;
+      } catch (error) {
+        console.error("Error sincronizando prospecto:", error);
+        break;
+      }
+    }
+
+    localStorage.setItem('prospectos_offline', JSON.stringify(restantes));
+    revisarPendientes();
+    if (enviados > 0) {
+      setAlertaOffline(`¡Se sincronizaron ${enviados} prospectos atrasados con el servidor!`);
+      setTimeout(() => setAlertaOffline(null), 5000);
+    }
+  };
+
+  const guardarOffline = (datos) => {
+    const pActuales = JSON.parse(localStorage.getItem('prospectos_offline')) || [];
+    const nuevo = { ...datos, id_local: Date.now() };
+    pActuales.push(nuevo);
+    localStorage.setItem('prospectos_offline', JSON.stringify(pActuales));
+    revisarPendientes();
+  };
+
   const obtenerIdYRolReal = async () => {
     let idFinal = null;
     let rolDetectado = null;
@@ -192,13 +344,12 @@ const NuevoProspect = ({ usuarioActual }) => {
     const idUsuarioLogueado = Number(usuarioActual?.id);
     const nombreCompleto = `${usuarioActual?.nombre || ''} ${usuarioActual?.apellido || ''}`.trim().toLowerCase();
 
-    // 1. SI ES UN CANVACEADOR
     if (rolSesion === 'canvaceador') {
       rolDetectado = 'canvaceador';
       if (usuarioActual?.perfil_id) return { id: Number(usuarioActual.perfil_id), rol: rolDetectado };
 
       try {
-        const resCanv = await api.get('/canvaceadores/');
+        const resCanv = await api.get('/usuarios/?rol=Canvaceador');
         const match = resCanv.data.find(c => {
           const uId_1 = typeof c.usuario_id === 'object' ? c.usuario_id?.id : c.usuario_id;
           const numEmpleado = String(c.numero_empleado || '').toLowerCase().trim();
@@ -206,15 +357,13 @@ const NuevoProspect = ({ usuarioActual }) => {
         });
         if (match) idFinal = match.id;
       } catch (error) { console.error("Error canvaceadores:", error); }
-    } 
-    
-    // 2. SI ES UN TÉCNICO
+    }
     else if (rolSesion === 'tecnico') {
       rolDetectado = 'tecnico';
       if (usuarioActual?.perfil_id) return { id: Number(usuarioActual.perfil_id), rol: rolDetectado };
 
       try {
-        const resTec = await api.get('/tecnicos/');
+        const resTec = await api.get('/usuarios/?rol=Tecnico');
         const match = resTec.data.find(t => {
           const uId_1 = typeof t.usuario_id === 'object' ? t.usuario_id?.id : t.usuario_id;
           const numEmpleado = String(t.numero_empleado || '').toLowerCase().trim();
@@ -230,53 +379,90 @@ const NuevoProspect = ({ usuarioActual }) => {
   const isStepOptional = (step) => step === 1;
   const isStepSkipped = (step) => skipped.has(step);
 
-  const validarNombre = (valor) => /^[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\s]*$/.test(valor);
-  const validarTelefono = (valor) => /^\d*$/.test(valor);
+  const soloLetras = (valor) => /^[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\s'.-]*$/.test(valor);
 
   const handleNombreChange = (valor) => {
-    if (validarNombre(valor)) {
-      setFormData({ ...formData, nombre_completo: valor });
-      setErroresValidacion({ ...erroresValidacion, nombre: false, nombreMensaje: '' });
-    } else {
-      setErroresValidacion({ ...erroresValidacion, nombre: true, nombreMensaje: 'Solo letras' });
+    // Filtramos caracteres inválidos al teclear, pero la validación de fondo
+    // (que sea un nombre y no relleno) se hace al intentar avanzar de paso.
+    if (!soloLetras(valor)) {
+      setErroresValidacion(prev => ({ ...prev, nombre: true, nombreMensaje: 'El nombre solo puede llevar letras' }));
+      return;
     }
+    setFormData(prev => ({ ...prev, nombre_completo: valor }));
+    setErroresValidacion(prev => ({ ...prev, nombre: false, nombreMensaje: '' }));
   };
 
   const handleTelefonoChange = (valor) => {
-    if (validarTelefono(valor)) {
-      const valorLimpio = valor.slice(0, 10);
-      setFormData({ ...formData, telefono_whatsapp: valorLimpio });
-      if (valorLimpio.length > 0 && valorLimpio.length < 10) {
-        setErroresValidacion({ ...erroresValidacion, telefono: true, telefonoMensaje: `Faltan ${10 - valorLimpio.length} dígitos` });
-      } else {
-        setErroresValidacion({ ...erroresValidacion, telefono: false, telefonoMensaje: '' });
-      }
-    } else {
-      setErroresValidacion({ ...erroresValidacion, telefono: true, telefonoMensaje: 'Solo números' });
+    if (!/^\d*$/.test(valor)) {
+      setErroresValidacion(prev => ({ ...prev, telefono: true, telefonoMensaje: 'El teléfono solo lleva números' }));
+      return;
     }
+    const valorLimpio = valor.slice(0, 10);
+    setFormData(prev => ({ ...prev, telefono_whatsapp: valorLimpio }));
+    setErroresValidacion(prev => ({ ...prev, telefono: false, telefonoMensaje: '' }));
   };
 
-  const validarPaso = () => {
-    if (activeStep === 0) {
-      if (!formData.nombre_completo.trim()) {
-        setErroresValidacion({ ...erroresValidacion, nombre: true, nombreMensaje: 'Requerido' });
-        setErrorApi('El nombre es obligatorio');
-        return false;
+  /**
+   * Valida el paso indicado y deja los errores en pantalla.
+   *
+   * Cada paso se valida al intentar salir de él, no al final: si el canvaceador
+   * puso datos al azar en el paso 1, no tiene sentido enterarse hasta el paso 4.
+   */
+  const validarPaso = (paso) => {
+    let errores = {};
+
+    if (paso === 0) {
+      const errNombre = validarNombrePersona(formData.nombre_completo);
+      const errTelefono = validarTelefonoMx(formData.telefono_whatsapp);
+      if (errNombre) errores.nombre = errNombre;
+      if (errTelefono) errores.telefono = errTelefono;
+    }
+
+    if (paso === 1) {
+      // La ubicación es opcional (el paso se puede saltar), pero si el
+      // canvaceador escribió algo, tiene que ser información real.
+      if (metodoUbicacion === 'manual') {
+        const errCalle = validarDireccion(formData.direccion_calle_numero, {
+          obligatorio: false, etiqueta: 'La calle y número'
+        });
+        const errColonia = validarTextoLibre(formData.direccion_colonia, { etiqueta: 'La colonia' });
+        const errRef = validarTextoLibre(formData.referencia_domicilio, { etiqueta: 'La referencia' });
+        if (errCalle) errores.direccion = errCalle;
+        else if (errColonia) errores.direccion = errColonia;
+        else if (errRef) errores.direccion = errRef;
       }
-      if (!formData.telefono_whatsapp.trim() || formData.telefono_whatsapp.length !== 10) {
-        setErroresValidacion({ ...erroresValidacion, telefono: true, telefonoMensaje: 'Deben ser 10 dígitos' });
-        setErrorApi('Teléfono a 10 dígitos obligatorio');
-        return false;
+      if ((metodoUbicacion === 'gps' || metodoUbicacion === 'mapa') && !coordenadas.includes(',')) {
+        errores.direccion = metodoUbicacion === 'gps'
+          ? 'Toca "Obtener GPS" para capturar la ubicación, o cambia de método'
+          : 'Toca el mapa para fijar el pin en la casa del cliente';
       }
     }
-    setErrorApi(null);
-    return true;
+
+    if (paso === 2) {
+      const errNotas = validarTextoLibre(formData.notas_canvaceador, { etiqueta: 'Las notas' });
+      if (errNotas) errores.notas = errNotas;
+    }
+
+    setErroresValidacion(prev => ({
+      ...prev,
+      nombre: Boolean(errores.nombre), nombreMensaje: errores.nombre || '',
+      telefono: Boolean(errores.telefono), telefonoMensaje: errores.telefono || '',
+      direccionMensaje: errores.direccion || '',
+      notasMensaje: errores.notas || ''
+    }));
+
+    const mensajes = Object.values(errores);
+    setErrorApi(mensajes.length ? mensajes.join(' · ') : null);
+    return mensajes.length === 0;
   };
 
   const handleNext = async () => {
-    if (!validarPaso()) return;
+    if (!validarPaso(activeStep)) return;
+
+    // Último paso: no guardamos directo, primero mostramos el resumen para que
+    // confirme. Guardar sin confirmación es lo que provoca registros basura.
     if (activeStep === pasos.length - 1) {
-      await guardarProspecto();
+      setConfirmacionAbierta(true);
       return;
     }
     let newSkipped = skipped;
@@ -292,8 +478,14 @@ const NuevoProspect = ({ usuarioActual }) => {
     setGuardando(true);
     setErrorApi(null);
     try {
-      // 🚀 AQUI USAMOS LA MAGIA DEL DOBLE BUSCADOR
       const { id: idRealEmpleado, rol: rolEmpleado } = await obtenerIdYRolReal();
+
+      let lat = null, lng = null;
+      if (coordenadas && coordenadas.includes(',')) {
+        const partes = coordenadas.split(',');
+        lat = parseFloat(partes[0].trim());
+        lng = parseFloat(partes[1].trim());
+      }
 
       const datosParaBackend = {
         nombre_completo: formData.nombre_completo.trim(),
@@ -304,38 +496,46 @@ const NuevoProspect = ({ usuarioActual }) => {
         referencia_domicilio: formData.referencia_domicilio?.trim() || null,
         plan_interes: planInteres?.nombre || null,
         notas_canvaceador: formData.notas_canvaceador?.trim() || null,
-        estado: 'Nuevo',
-        
-        // 🚀 Si es canvaceador se va a uno, si es técnico se va al otro
+
+        estado: estadoFinal,
+        dentro_cobertura: dentroCobertura,
+
+        fecha_captura_real: new Date().toISOString(),
+
         canvaceador_id: rolEmpleado === 'canvaceador' ? idRealEmpleado : null,
         tecnico_id: rolEmpleado === 'tecnico' ? idRealEmpleado : null
       };
 
-      if (coordenadas && coordenadas.includes(',')) {
-        const partes = coordenadas.split(',');
-        const lat = parseFloat(partes[0].trim());
-        const lng = parseFloat(partes[1].trim());
-        if (!isNaN(lat) && !isNaN(lng)) {
-          datosParaBackend.ubicacion_gps = {
-            type: "Point",
-            coordinates: [lng, lat]
-          };
-        }
+      if (lat != null && lng != null && !isNaN(lat) && !isNaN(lng)) {
+        datosParaBackend.ubicacion_gps = {
+          type: "Point",
+          coordinates: [lng, lat]
+        };
       }
 
-      await createProspecto(datosParaBackend);
+      if (isOnline) {
+        try {
+          await createProspecto(datosParaBackend);
+        } catch (err) {
+          console.warn("Fallo API online, guardando offline", err);
+          guardarOffline(datosParaBackend);
+        }
+      } else {
+        guardarOffline(datosParaBackend);
+      }
+
+      setResultadoGuardado({
+        lat, lng,
+        estado: estadoFinal,
+        nombre: formData.nombre_completo.trim(),
+        dentroCobertura
+      });
+
       setActiveStep((prev) => prev + 1);
 
     } catch (err) {
       console.error(err);
-      if (err.response && err.response.data) {
-        const errores = typeof err.response.data === 'object'
-          ? Object.entries(err.response.data).map(([key, val]) => `${key}: ${val}`).join(' | ')
-          : JSON.stringify(err.response.data);
-        setErrorApi(`Backend rechazó los datos: ${errores}`);
-      } else {
-        setErrorApi(`Error al guardar: ${err.message}`);
-      }
+      setErrorApi(`Error crítico: ${err.message}`);
     } finally {
       setGuardando(false);
     }
@@ -351,31 +551,46 @@ const NuevoProspect = ({ usuarioActual }) => {
 
   const handleReset = () => {
     setActiveStep(0);
-    setCoordenadas('');
-    setMetodoUbicacion('manual');
     setPlanInteres(null);
     setErrorApi(null);
+    setDentroCobertura(null);
+    setResultadoGuardado(null);
     setFormData({ nombre_completo: '', telefono_whatsapp: '', direccion_calle_numero: '', direccion_colonia: '', referencia_domicilio: '', notas_canvaceador: '' });
+
+  
+    if (ubicacionInicial && ubicacionInicial.lat != null && ubicacionInicial.lng != null) {
+      setMetodoUbicacion('mapa');
+      setCoordenadas(`${ubicacionInicial.lat.toFixed(6)}, ${ubicacionInicial.lng.toFixed(6)}`);
+    } else {
+      setMetodoUbicacion('manual');
+      setCoordenadas('');
+    }
   };
 
   const consultarDireccionHumana = async (latitude, longitude) => {
-    try {
-      setLoadingGeocode(true);
-      const response = await api.get('/reverse-geocode/', {
-        params: { lat: latitude, lng: longitude }
-      });
-
-      if (response.data && response.data.direccion) {
-        setFormData(prev => ({
-          ...prev,
-          direccion_calle_numero: response.data.direccion
-        }));
-      }
-    } catch (error) {
-      console.error("Error al traducir coordenadas:", error);
-    } finally {
-      setLoadingGeocode(false);
+    if (!isOnline) {
+      setFormData(prev => ({
+        ...prev,
+        direccion_calle_numero: `Ubicación GPS: ${latitude.toFixed(5)}, ${longitude.toFixed(5)} (Modo Offline)`
+      }));
+      return;
     }
+
+    setLoadingGeocode(true);
+    setErrorGeocode(null);
+
+    const { direccion, error } = await obtenerDireccion(latitude, longitude);
+    setLoadingGeocode(false);
+
+    if (direccion) {
+      setFormData(prev => ({ ...prev, direccion_calle_numero: direccion }));
+      return;
+    }
+
+    // Sin traducción avisamos en pantalla en vez de escribir las coordenadas
+    // dentro del campo de dirección, que se leía como si esa fuera la calle.
+    setErrorGeocode(error);
+    console.warn('No se pudo traducir las coordenadas:', error);
   };
 
   const obtenerUbicacionGPS = () => {
@@ -401,16 +616,48 @@ const NuevoProspect = ({ usuarioActual }) => {
     setTimeout(() => setLinkCopiado(false), 3000);
   };
 
+  const centroFormMapa = ubicacionInicial && ubicacionInicial.lat != null
+    ? [ubicacionInicial.lat, ubicacionInicial.lng]
+    : [18.4628, -97.3928];
+
+  const BannerCobertura = () => {
+    if (typeof verificarCobertura !== 'function') return null;
+    if (dentroCobertura === null) {
+      const hayCoordenadas = coordenadas.includes(',') &&
+        !isNaN(parseFloat(coordenadas.split(',')[0]));
+
+      return hayCoordenadas ? (
+        <Alert severity="warning" icon={<Place />} sx={{ mb: 2 }}>
+          <strong>No se pudo verificar la cobertura</strong> (la capa de zonas no cargó).
+          El registro se guardará como <strong>NUEVO</strong> para clasificarlo después.
+        </Alert>
+      ) : (
+        <Alert severity="info" icon={<Place />} sx={{ mb: 2 }}>
+          Fija la ubicación del domicilio para clasificar automáticamente el registro.
+        </Alert>
+      );
+    }
+    return dentroCobertura ? (
+      <Alert severity="success" icon={<CheckCircle />} sx={{ mb: 2 }}>
+        <strong>Dentro de la zona de cobertura.</strong> Se registrará como <strong>POSIBLE CLIENTE</strong>.
+      </Alert>
+    ) : (
+      <Alert severity="warning" icon={<Place />} sx={{ mb: 2 }}>
+        <strong>Fuera de la zona de cobertura.</strong> Se registrará como <strong>PROSPECTO</strong>.
+      </Alert>
+    );
+  };
+
   const renderStepContent = (step) => {
     switch (step) {
       case 0:
         return (
           <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
-
             <TextField
               label="Nombre Completo del Prospecto *" fullWidth size="small" required
               value={formData.nombre_completo} onChange={(e) => handleNombreChange(e.target.value)}
-              error={erroresValidacion.nombre} helperText={erroresValidacion.nombreMensaje || 'Solo letras'}
+              error={erroresValidacion.nombre}
+              helperText={erroresValidacion.nombreMensaje || 'Nombre(s), apellido paterno y materno'}
             />
             <TextField
               label="Teléfono (WhatsApp) *" fullWidth size="small" required
@@ -434,9 +681,35 @@ const NuevoProspect = ({ usuarioActual }) => {
 
             <Box sx={{ mt: 3, p: 2, backgroundColor: '#f8fafc', borderRadius: 2, border: '1px solid #e2e8f0' }}>
 
+              {erroresValidacion.direccionMensaje && (
+                <Alert severity="error" sx={{ mb: 2 }}>{erroresValidacion.direccionMensaje}</Alert>
+              )}
+
+              {/* Se capturó el punto pero el servicio de mapas no dio la calle */}
+              {errorGeocode && !loadingGeocode && (
+                <Alert
+                  severity="warning"
+                  sx={{ mb: 2 }}
+                  action={
+                    <Button
+                      color="inherit" size="small"
+                      onClick={() => {
+                        const [la, ln] = coordenadas.split(',').map(v => parseFloat(v));
+                        if (!isNaN(la) && !isNaN(ln)) consultarDireccionHumana(la, ln);
+                      }}
+                    >
+                      Reintentar
+                    </Button>
+                  }
+                >
+                  <strong>No se pudo obtener la calle y número.</strong> {errorGeocode}
+                  {' '}La ubicación sí quedó registrada.
+                </Alert>
+              )}
+
               {metodoUbicacion === 'manual' && (
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <TextField label="Calle y Número" fullWidth size="small" value={formData.direccion_calle_numero} onChange={(e) => setFormData({ ...formData, direccion_calle_numero: e.target.value })} />
+                  <TextField label="Calle y Número" fullWidth size="small" error={Boolean(erroresValidacion.direccionMensaje)} value={formData.direccion_calle_numero} onChange={(e) => setFormData({ ...formData, direccion_calle_numero: e.target.value })} />
                   <TextField label="Colonia" fullWidth size="small" value={formData.direccion_colonia} onChange={(e) => setFormData({ ...formData, direccion_colonia: e.target.value })} />
                   <TextField label="Referencia" fullWidth size="small" multiline rows={2} value={formData.referencia_domicilio} onChange={(e) => setFormData({ ...formData, referencia_domicilio: e.target.value })} />
                 </Box>
@@ -458,13 +731,13 @@ const NuevoProspect = ({ usuarioActual }) => {
               {metodoUbicacion === 'mapa' && (
                 <Box sx={{ textAlign: 'center', py: 1 }}>
                   <Typography variant="body2" sx={{ mb: 2, color: '#64748b' }}>
-                    Haz clic en el mapa para soltar un marcador en la casa del cliente.
+                    Haz clic en el mapa para soltar/mover el marcador en la casa del cliente.
                   </Typography>
 
                   <Box sx={{ width: '100%', height: 300, borderRadius: 2, overflow: 'hidden', mb: 2, border: '1px solid #cbd5e1' }}>
                     <MapContainer
-                      center={[18.4628, -97.3928]}
-                      zoom={14}
+                      center={centroFormMapa}
+                      zoom={ubicacionInicial ? 17 : 14}
                       style={{ height: '100%', width: '100%' }}
                       preferCanvas={true}
                     >
@@ -472,12 +745,21 @@ const NuevoProspect = ({ usuarioActual }) => {
                         url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
                         attribution='&copy; Google Maps'
                       />
+                      <AjustarTamanoMapa />
+
+                      {poligonoCobertura && (
+                        <GeoJSON
+                          data={poligonoCobertura}
+                          style={{ color: '#3b82f6', weight: 2, fillColor: '#3b82f6', fillOpacity: 0.25 }}
+                        />
+                      )}
+
                       <ClicEnMapa alHacerClic={(lat, lng) => {
                         setCoordenadas(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
                         consultarDireccionHumana(lat, lng);
                       }} />
 
-                      {coordenadas && (
+                      {coordenadas && coordenadas.includes(',') && (
                         <CircleMarker
                           center={[parseFloat(coordenadas.split(',')[0]), parseFloat(coordenadas.split(',')[1])]}
                           radius={8}
@@ -515,28 +797,43 @@ const NuevoProspect = ({ usuarioActual }) => {
       case 2:
         return (
           <Box sx={{ mt: 2 }}>
-            {loadingPlanes ? (<CircularProgress />) : (
+            {cargandoPlanes ? (<CircularProgress />) : (
               <SeleccionPlanesCanvaceo
                 planSeleccionado={planInteres} onPlanSeleccionado={setPlanInteres}
-                planesFibraSimetrica={planesFibraSimetrica} planesFibraAsimetrica={planesFibraAsimetrica}
-                planesSolitTV={planesSolitTV} planesHibridos={planesHibridos} planesAntenaWireless={planesAntenaWireless}
+                planesFibraSimetrica={planesCache.simetrica}
+                planesFibraAsimetrica={planesCache.asimetrica}
+                planesSolitTV={planesCache.tv}
+                planesHibridos={planesCache.hibridos}
+                planesAntenaWireless={planesCache.wireless}
               />
             )}
-            <TextField label="Notas del Canvaceador" fullWidth size="small" multiline rows={3} sx={{ mt: 3 }} value={formData.notas_canvaceador} onChange={(e) => setFormData({ ...formData, notas_canvaceador: e.target.value })} />
+            <TextField
+              label="Notas del Canvaceador" fullWidth size="small" multiline rows={3} sx={{ mt: 3 }}
+              value={formData.notas_canvaceador}
+              onChange={(e) => setFormData({ ...formData, notas_canvaceador: e.target.value })}
+              error={Boolean(erroresValidacion.notasMensaje)}
+              helperText={erroresValidacion.notasMensaje || 'Opcional'}
+            />
           </Box>
         );
       case 3:
         return (
           <Box sx={{ mt: 2 }}>
             {errorApi && (<Alert severity="error" sx={{ mb: 2, whiteSpace: 'pre-line' }}>{errorApi}</Alert>)}
-            <Alert severity="info" sx={{ mb: 2 }}>
-              <strong>Resumen del Prospecto:</strong>
-              <ul>
-                <li>Nombre: <strong>{formData.nombre_completo}</strong></li>
-                <li>Teléfono: <strong>{formData.telefono_whatsapp}</strong></li>
-                {formData.direccion_calle_numero && <li>Dirección: <strong>{formData.direccion_calle_numero}</strong></li>}
-                {planInteres && <li>Plan: <strong>{planInteres.nombre}</strong></li>}
-              </ul>
+
+            {/* Chip con la clasificación resultante */}
+            {typeof verificarCobertura === 'function' && dentroCobertura !== null && (
+              <Chip
+                icon={dentroCobertura ? <CheckCircle /> : <Place />}
+                label={dentroCobertura ? 'Se guardará como: POSIBLE CLIENTE' : 'Se guardará como: PROSPECTO'}
+                color={dentroCobertura ? 'success' : 'warning'}
+                sx={{ mb: 2, fontWeight: 700 }}
+              />
+            )}
+
+            <Alert severity="info" icon={<FactCheck />}>
+              Ya está todo listo. Al tocar <strong>Finalizar Registro</strong> verás el
+              resumen para revisarlo antes de guardar.
             </Alert>
           </Box>
         );
@@ -545,11 +842,38 @@ const NuevoProspect = ({ usuarioActual }) => {
   };
 
   return (
-    <Box sx={{ maxWidth: 800, margin: 'auto' }}>
-      <Typography variant="h5" sx={{ fontWeight: 700, color: '#1e293b', mb: 3 }}>
-        Registrar Nuevo Prospecto
-      </Typography>
-      <Paper variant="outlined" sx={{ p: 4, borderRadius: 3 }}>
+    <Box sx={{ maxWidth: enModal ? '100%' : 800, margin: enModal ? 0 : 'auto' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, flexWrap: 'wrap', gap: 1 }}>
+        {!enModal && (
+          <Typography variant="h5" sx={{ fontWeight: 700, color: '#1e293b' }}>
+            Registrar Nuevo Prospecto
+          </Typography>
+        )}
+        <Box sx={{ display: 'flex', gap: 1, ml: enModal ? 'auto' : 0 }}>
+          <Chip
+            icon={isOnline ? <CloudDone /> : <WifiOff />}
+            label={isOnline ? "En Línea" : "Sin Conexión"}
+            color={isOnline ? "success" : "warning"}
+            variant="outlined"
+            size="small"
+          />
+          {pendientesOffline > 0 && (
+            <Chip
+              label={`${pendientesOffline} pendientes`}
+              color="error"
+              size="small"
+              onClick={isOnline ? sincronizarPendientes : null}
+            />
+          )}
+        </Box>
+      </Box>
+
+      {alertaOffline && <Alert severity="success" sx={{ mb: 2 }}>{alertaOffline}</Alert>}
+
+      <Paper variant={enModal ? 'elevation' : 'outlined'} elevation={enModal ? 0 : undefined} sx={{ p: enModal ? 0 : 4, borderRadius: 3, boxShadow: enModal ? 'none' : undefined }}>
+
+        {activeStep < pasos.length && <BannerCobertura />}
+
         <Stepper activeStep={activeStep} orientation="vertical">
           {pasos.map((paso, index) => (
             <Step key={paso.label} completed={activeStep > index && !isStepSkipped(index)}>
@@ -557,152 +881,11 @@ const NuevoProspect = ({ usuarioActual }) => {
                 <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{paso.label}</Typography>
               </StepLabel>
               <StepContent>
-                {(() => {
-                  switch (index) {
-                    case 0:
-                      return (
-                        <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
-
-                          <TextField
-                            label="Nombre Completo del Prospecto *" fullWidth size="small" required
-                            value={formData.nombre_completo} onChange={(e) => handleNombreChange(e.target.value)}
-                            error={erroresValidacion.nombre} helperText={erroresValidacion.nombreMensaje || 'Solo letras'}
-                          />
-                          <TextField
-                            label="Teléfono (WhatsApp) *" fullWidth size="small" required
-                            value={formData.telefono_whatsapp} onChange={(e) => handleTelefonoChange(e.target.value)}
-                            error={erroresValidacion.telefono} helperText={erroresValidacion.telefonoMensaje || `${formData.telefono_whatsapp.length}/10 dígitos`}
-                          />
-                        </Box>
-                      );
-                    case 1:
-                      return (
-                        <Box sx={{ mt: 2 }}>
-                          <FormControl component="fieldset">
-                            <FormLabel component="legend" sx={{ mb: 1, fontWeight: 600 }}>Método de Registro de Domicilio</FormLabel>
-                            <RadioGroup value={metodoUbicacion} onChange={(e) => setMetodoUbicacion(e.target.value)}>
-                              <FormControlLabel value="manual" control={<Radio />} label="1. Dirección Manual" />
-                              <FormControlLabel value="gps" control={<Radio />} label="2. GPS en Tiempo Real" />
-                              <FormControlLabel value="mapa" control={<Radio />} label="3. Fijar Pin en el Mapa" />
-                              <FormControlLabel value="link" control={<Radio />} label="4. Link por WhatsApp" />
-                            </RadioGroup>
-                          </FormControl>
-
-                          <Box sx={{ mt: 3, p: 2, backgroundColor: '#f8fafc', borderRadius: 2, border: '1px solid #e2e8f0' }}>
-
-                            {metodoUbicacion === 'manual' && (
-                              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                                <TextField label="Calle y Número" fullWidth size="small" value={formData.direccion_calle_numero} onChange={(e) => setFormData({ ...formData, direccion_calle_numero: e.target.value })} />
-                                <TextField label="Colonia" fullWidth size="small" value={formData.direccion_colonia} onChange={(e) => setFormData({ ...formData, direccion_colonia: e.target.value })} />
-                                <TextField label="Referencia" fullWidth size="small" multiline rows={2} value={formData.referencia_domicilio} onChange={(e) => setFormData({ ...formData, referencia_domicilio: e.target.value })} />
-                              </Box>
-                            )}
-
-                            {metodoUbicacion === 'gps' && (
-                              <Box sx={{ textAlign: 'center', py: 2 }}>
-                                <Button variant="contained" startIcon={loadingGps || loadingGeocode ? <CircularProgress size={20} color="inherit" /> : <MyLocation />} onClick={obtenerUbicacionGPS} disabled={loadingGps || loadingGeocode}>
-                                  {loadingGeocode ? 'Traduciendo Dirección...' : 'Obtener GPS'}
-                                </Button>
-                                {formData.direccion_calle_numero && !loadingGeocode && (
-                                  <Alert severity="success" sx={{ mt: 2 }} icon={<CheckCircle />}>
-                                    Ubicación detectada: <strong>{formData.direccion_calle_numero}</strong>
-                                  </Alert>
-                                )}
-                              </Box>
-                            )}
-
-                            {metodoUbicacion === 'mapa' && (
-                              <Box sx={{ textAlign: 'center', py: 1 }}>
-                                <Typography variant="body2" sx={{ mb: 2, color: '#64748b' }}>
-                                  Haz clic en el mapa para soltar un marcador en la casa del cliente.
-                                </Typography>
-
-                                <Box sx={{ width: '100%', height: 300, borderRadius: 2, overflow: 'hidden', mb: 2, border: '1px solid #cbd5e1' }}>
-                                  <MapContainer
-                                    center={[18.4628, -97.3928]}
-                                    zoom={14}
-                                    style={{ height: '100%', width: '100%' }}
-                                    preferCanvas={true}
-                                  >
-                                    <TileLayer
-                                      url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
-                                      attribution='&copy; Google Maps'
-                                    />
-                                    <ClicEnMapa alHacerClic={(lat, lng) => {
-                                      setCoordenadas(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
-                                      consultarDireccionHumana(lat, lng);
-                                    }} />
-
-                                    {coordenadas && (
-                                      <CircleMarker
-                                        center={[parseFloat(coordenadas.split(',')[0]), parseFloat(coordenadas.split(',')[1])]}
-                                        radius={8}
-                                        pathOptions={{ color: '#dc2626', fillColor: '#ef4444', fillOpacity: 1, weight: 3 }}
-                                      />
-                                    )}
-                                  </MapContainer>
-                                </Box>
-
-                                {loadingGeocode && (
-                                  <Alert severity="info" sx={{ mt: 2, textAlign: 'left' }}>
-                                    <CircularProgress size={16} sx={{ mr: 1, verticalAlign: 'middle' }} /> Traduciendo coordenadas con Google...
-                                  </Alert>
-                                )}
-
-                                {formData.direccion_calle_numero && !loadingGeocode && coordenadas && (
-                                  <Alert severity="success" sx={{ mt: 2, textAlign: 'left' }}>
-                                    Pin fijado en: <strong>{formData.direccion_calle_numero}</strong>
-                                  </Alert>
-                                )}
-                              </Box>
-                            )}
-
-                            {metodoUbicacion === 'link' && (
-                              <Box sx={{ textAlign: 'center', py: 2 }}>
-                                <Typography variant="body2" sx={{ mb: 2, color: '#64748b' }}>Genera un enlace para enviarlo al cliente.</Typography>
-                                <TextField fullWidth size="small" value="https://solitsystem.app/loc/req-98x7" InputProps={{ readOnly: true, endAdornment: (<InputAdornment position="end"> <Tooltip title={linkCopiado ? "¡Copiado!" : "Copiar"}> <IconButton onClick={copiarLinkCliente} color={linkCopiado ? "success" : "default"}> {linkCopiado ? <CheckCircle /> : <ContentCopy />} </IconButton> </Tooltip> </InputAdornment>), }} />
-                                <Button variant="outlined" color="success" startIcon={<WhatsApp />} sx={{ mt: 2, textTransform: 'none' }}>Enviar por WhatsApp</Button>
-                              </Box>
-                            )}
-
-                          </Box>
-                        </Box>
-                      );
-                    case 2:
-                      return (
-                        <Box sx={{ mt: 2 }}>
-                          {loadingPlanes ? (<CircularProgress />) : (
-                            <SeleccionPlanesCanvaceo
-                              planSeleccionado={planInteres} onPlanSeleccionado={setPlanInteres}
-                              planesFibraSimetrica={planesFibraSimetrica} planesFibraAsimetrica={planesFibraAsimetrica}
-                              planesSolitTV={planesSolitTV} planesHibridos={planesHibridos} planesAntenaWireless={planesAntenaWireless}
-                            />
-                          )}
-                          <TextField label="Notas del Canvaceador" fullWidth size="small" multiline rows={3} sx={{ mt: 3 }} value={formData.notas_canvaceador} onChange={(e) => setFormData({ ...formData, notas_canvaceador: e.target.value })} />
-                        </Box>
-                      );
-                    case 3:
-                      return (
-                        <Box sx={{ mt: 2 }}>
-                          {errorApi && (<Alert severity="error" sx={{ mb: 2, whiteSpace: 'pre-line' }}>{errorApi}</Alert>)}
-                          <Alert severity="info" sx={{ mb: 2 }}>
-                            <strong>Resumen del Prospecto:</strong>
-                            <ul>
-                              <li>Nombre: <strong>{formData.nombre_completo}</strong></li>
-                              <li>Teléfono: <strong>{formData.telefono_whatsapp}</strong></li>
-                              {formData.direccion_calle_numero && <li>Dirección: <strong>{formData.direccion_calle_numero}</strong></li>}
-                              {planInteres && <li>Plan: <strong>{planInteres.nombre}</strong></li>}
-                            </ul>
-                          </Alert>
-                        </Box>
-                      );
-                    default: return '';
-                  }
-                })()}
+                {renderStepContent(index)}
 
                 <Box sx={{ mb: 2, mt: 3 }}>
-                  <Button variant="contained" onClick={handleNext} disabled={guardando} sx={{ mr: 1 }}>
-                    {guardando ? 'Guardando...' : (index === pasos.length - 1 ? 'Finalizar Registro' : 'Continuar')}
+                  <Button variant="contained" onClick={handleNext} disabled={guardando} color={isOnline ? "primary" : "warning"} sx={{ mr: 1 }}>
+                    {guardando ? 'Guardando...' : (index === pasos.length - 1 ? (isOnline ? 'Finalizar Registro' : 'Guardar Localmente') : 'Continuar')}
                   </Button>
                   {isStepOptional(index) && <Button color="inherit" onClick={handleSkip} sx={{ mr: 1 }}>Saltar</Button>}
                   <Button disabled={index === 0 || guardando} onClick={handleBack} sx={{ mr: 1 }}>Atrás</Button>
@@ -718,17 +901,125 @@ const NuevoProspect = ({ usuarioActual }) => {
             <Typography variant="h6" sx={{ color: '#166534', fontWeight: 600 }}>
               ¡Prospecto guardado con éxito!
             </Typography>
+
+            {resultadoGuardado && (
+              <Chip
+                icon={resultadoGuardado.dentroCobertura ? <CheckCircle /> : <PersonPin />}
+                label={`Registrado como: ${resultadoGuardado.estado}`}
+                color={resultadoGuardado.dentroCobertura ? 'success' : 'warning'}
+                sx={{ mt: 1, fontWeight: 700 }}
+              />
+            )}
+
             <Typography sx={{ mt: 1, mb: 3, color: '#15803d' }}>
-              La información ha sido enviada a la base de datos.
+              {isOnline ? 'La información ha sido enviada a la base de datos.' : 'Guardado en el teléfono. Se enviará automáticamente cuando recuperes la señal.'}
             </Typography>
             <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, flexWrap: 'wrap' }}>
               <Button onClick={handleReset} variant="outlined" color="success">
                 Registrar otro prospecto
               </Button>
+              {enModal && (
+                <Button
+                  onClick={() => onFinalizar && onFinalizar(resultadoGuardado)}
+                  variant="contained"
+                  color="primary"
+                >
+                  Cerrar y ver en el mapa
+                </Button>
+              )}
             </Box>
           </Paper>
         )}
       </Paper>
+
+      {/* Resumen y confirmación antes de guardar */}
+      <Dialog
+        open={confirmacionAbierta}
+        onClose={() => !guardando && setConfirmacionAbierta(false)}
+        maxWidth="xs"
+        fullWidth
+        slotProps={{ paper: { sx: { borderRadius: 3 } } }}
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, fontWeight: 700 }}>
+          <HelpOutlined color="primary" />
+          ¿Guardar este prospecto?
+        </DialogTitle>
+
+        <DialogContent dividers>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            Revisa que los datos sean correctos antes de guardar.
+          </Typography>
+
+          <List dense disablePadding>
+            <ListItem disableGutters divider>
+              <ListItemText primary="Nombre" secondary={formData.nombre_completo || '—'}
+                secondaryTypographyProps={{ fontWeight: 700, color: '#0f172a' }} />
+            </ListItem>
+            <ListItem disableGutters divider>
+              <ListItemText primary="Teléfono (WhatsApp)" secondary={formData.telefono_whatsapp || '—'}
+                secondaryTypographyProps={{ fontWeight: 700, color: '#0f172a' }} />
+            </ListItem>
+            <ListItem disableGutters divider>
+              <ListItemText
+                primary="Domicilio"
+                secondary={
+                  [formData.direccion_calle_numero, formData.direccion_colonia]
+                    .filter(Boolean).join(', ') || 'Sin registrar'
+                }
+                secondaryTypographyProps={{ fontWeight: 700, color: '#0f172a' }}
+              />
+            </ListItem>
+            {coordenadas.includes(',') && (
+              <ListItem disableGutters divider>
+                <ListItemText primary="Coordenadas" secondary={coordenadas}
+                  secondaryTypographyProps={{ fontWeight: 700, color: '#0f172a' }} />
+              </ListItem>
+            )}
+            <ListItem disableGutters divider>
+              <ListItemText primary="Plan de interés" secondary={planInteres?.nombre || 'Sin definir'}
+                secondaryTypographyProps={{ fontWeight: 700, color: '#0f172a' }} />
+            </ListItem>
+            {formData.notas_canvaceador && (
+              <ListItem disableGutters divider>
+                <ListItemText primary="Notas" secondary={formData.notas_canvaceador} />
+              </ListItem>
+            )}
+          </List>
+
+          <Alert
+            severity={dentroCobertura === true ? 'success' : dentroCobertura === false ? 'warning' : 'info'}
+            sx={{ mt: 2 }}
+          >
+            Se registrará como <strong>{estadoFinal}</strong>
+            {dentroCobertura === true && ' (dentro de la zona de cobertura)'}
+            {dentroCobertura === false && ' (fuera de la zona de cobertura)'}
+          </Alert>
+
+          {!isOnline && (
+            <Alert severity="warning" icon={<WifiOff />} sx={{ mt: 1 }}>
+              Sin conexión: se guardará en el teléfono y se enviará al recuperar señal.
+            </Alert>
+          )}
+        </DialogContent>
+
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={() => setConfirmacionAbierta(false)} disabled={guardando} color="inherit">
+            Revisar de nuevo
+          </Button>
+          <Button
+            variant="contained"
+            color={isOnline ? 'primary' : 'warning'}
+            disabled={guardando}
+            startIcon={guardando ? <CircularProgress size={16} color="inherit" /> : <CheckCircle />}
+            onClick={async () => {
+              await guardarProspecto();
+              setConfirmacionAbierta(false);
+            }}
+          >
+            {guardando ? 'Guardando...' : 'Sí, guardar'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

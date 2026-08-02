@@ -26,10 +26,12 @@ import {
   CalendarToday,
   Build,
   AttachMoney,
+  EmojiEvents,
   Map,
   Settings,
   People,
-  SimCard
+  SimCard,
+  FactCheck
 } from '@mui/icons-material';
 import { puedeAccederARuta, obtenerNombreRol, obtenerColorRol } from '../../config/roles';
 
@@ -49,6 +51,7 @@ const MENU_ITEMS = [
     items: [
       { text: 'Contrato Directo', icon: <Description />, key: 'ventas-contrato-directo' },
       { text: 'Seguimiento Prospectos', icon: <TrendingUp />, key: 'ventas-seguimiento' },
+      { text: 'Mis Contratos', icon: <FactCheck />, key: 'ventas-mis-contratos' },
       { text: 'Ventas de Chips', label: 'Gestión de Chips SIM', icon: <SimCard />, view: 'ventas-de-chips', key: 'ventas-de-chips' }
     ]
   },
@@ -68,6 +71,7 @@ const MENU_ITEMS = [
     section: 'ADMINISTRACIÓN VENTAS',
     items: [
       { text: 'Comisiones', icon: <AttachMoney />, key: 'admin-comisiones' },
+      { text: 'Bono Proactividad', icon: <EmojiEvents />, key: 'admin-bono-proactividad' },
       { text: 'Asignación Rutas', icon: <Map />, key: 'admin-asignacion-rutas' }
     ]
   },

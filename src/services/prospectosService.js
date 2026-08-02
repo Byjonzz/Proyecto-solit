@@ -4,9 +4,13 @@ const ENDPOINT = '/prospectos/';
 
 export const prospectosService = {
   
-  getAll: async () => {
+  /**
+   * @param {{canvaceador_id?: number, tecnico_id?: number}} filtros
+   *   Acota la consulta al registrador. Sin filtros devuelve todos.
+   */
+  getAll: async (filtros = {}) => {
     try {
-      const response = await api.get(ENDPOINT);
+      const response = await api.get(ENDPOINT, { params: filtros });
       return response.data;
     } catch (error) {
       throw error;
@@ -37,6 +41,15 @@ export const prospectosService = {
   update: async (id, data) => {
     try {
       const response = await api.put(`${ENDPOINT}${id}/`, data);
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  updateParcial: async (id, data) => {
+    try {
+      const response = await api.patch(`${ENDPOINT}${id}/`, data);
       return response.data;
     } catch (error) {
       throw error;

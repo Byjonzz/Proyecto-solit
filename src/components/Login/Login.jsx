@@ -256,7 +256,7 @@ const Login = ({ onLoginSuccess, loginFunction }) => {
             fontWeight: 500
           }}
         >
-          © 2026 Solit System - Todos los derechos reservados
+          © 2026 SolitConnect - Todos los derechos reservados
         </Typography>
       </Paper>
     </Box>

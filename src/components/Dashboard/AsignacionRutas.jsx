@@ -22,12 +22,12 @@ const createCustomIcon = (color) => new L.DivIcon({
   iconSize: [14, 14],
   iconAnchor: [7, 7]
 });
-const iconInicio = createCustomIcon('#10b981');
+const iconInicio = createCustomIcon('#060707');
 const iconPunto = createCustomIcon('#3b82f6');
 const iconDestino = createCustomIcon('#f43f5e');
 
 const API_RUTAS_URL = '/rutas_canvaceadores/';
-const API_CANVACEADORES_URL = '/canvaceadores/'; 
+const API_CANVACEADORES_URL = '/usuarios/?rol=Canvaceador';
 
 const AsignacionRutas = () => {
   const [canvaceadorId, setCanvaceadorId] = useState('');
@@ -60,7 +60,8 @@ const AsignacionRutas = () => {
       const responseCanvaceadores = await api.get(API_CANVACEADORES_URL);
       const canvaceadoresReales = responseCanvaceadores.data.map(canv => ({
         id: canv.id, 
-        nombre: canv.numero_empleado || canv.usuario || `Canvaceador #${canv.id}`
+        nombre: canv.nombre || canv.usuario || `Canvaceador #${canv.id}`,
+        apellido: canv.apellido || '',
       }));
       setCanvaceadoresDisponibles(canvaceadoresReales);
 
@@ -383,7 +384,7 @@ const AsignacionRutas = () => {
                       <MenuItem disabled value="">Cargando canvaceadores...</MenuItem>
                     ) : (
                       canvaceadoresDisponibles.map((canv) => (
-                        <MenuItem key={canv.id} value={canv.id}>{canv.nombre}</MenuItem>
+                        <MenuItem key={canv.id} value={canv.id}>{canv.nombre} {canv.apellido}</MenuItem>
                       ))
                     )}
                   </TextField>

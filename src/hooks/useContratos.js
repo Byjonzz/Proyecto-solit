@@ -104,6 +104,16 @@ export const useContratos = () => {
     }
   };
 
+
+  const fetchPendientesSilencioso = async () => {
+    try {
+      const data = await contratosService.getPendientes();
+      setContratos(data);
+    } catch (err) {
+      console.warn('Recarga automática de contratos falló:', err?.message);
+    }
+  };
+
   useEffect(() => {
     fetchContratos();
   }, []);
@@ -114,12 +124,13 @@ export const useContratos = () => {
     error,
     createContrato,
     updateContrato,
-    actualizarContrato, 
+    actualizarContrato,
     asignarCita,
     completarInstalacion,
     deleteContrato,
     refetch: fetchContratos,
     refetchPendientes: fetchPendientes,
+    refetchPendientesSilencioso: fetchPendientesSilencioso,
     refetchByTecnico: fetchByTecnico
   };
 };

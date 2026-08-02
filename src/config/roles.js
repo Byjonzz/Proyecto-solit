@@ -12,6 +12,7 @@ export const ROLES = {
 export const RUTAS_POR_ROL = {
   
   [ROLES.CANVACEADOR]: [
+    'ventas-mis-contratos',
     'canvaceo-dashboard',
     'canvaceo-registro',
     'canvaceo-ruta',
@@ -22,11 +23,14 @@ export const RUTAS_POR_ROL = {
   ],
   
   
+  // Ojo: el primero de la lista es la pantalla con la que arranca el rol al
+  // iniciar sesión (ver obtenerPrimeraRuta). Para el técnico eso es su trabajo
+  // del día, no el alta de contratos.
   [ROLES.TECNICO]: [
     'tecnico-ejecucion',
     'tecnico-mis-instalaciones',
+    'ventas-mis-contratos',
     'ventas-contrato-directo',
-    'ventas-seguimiento'
   ],
   
   
@@ -38,6 +42,7 @@ export const RUTAS_POR_ROL = {
   
   
   [ROLES.ADMIN_VENTAS]: [
+    'ventas-mis-contratos',
     'canvaceo-dashboard',
     'canvaceo-registro',
     'canvaceo-ruta',
@@ -51,6 +56,7 @@ export const RUTAS_POR_ROL = {
   
   [ROLES.ADMIN]: [
     'canvaceo-dashboard',
+    'ventas-mis-contratos',
     'canvaceo-registro',
     'canvaceo-ruta',
     'ventas-contrato-directo',
@@ -58,6 +64,7 @@ export const RUTAS_POR_ROL = {
     'logistica-agenda',
     'tecnico-ejecucion',
     'admin-comisiones',
+    'admin-bono-proactividad',
     'admin-asignacion-rutas',
     'admin-planes',
     'admin-usuarios',
@@ -79,6 +86,12 @@ export const puedeAccederARuta = (rolUsuario, ruta) => {
 };
 
 
+/**
+ * Pantalla con la que arranca cada rol al iniciar sesión.
+ *
+ * Es la primera de RUTAS_POR_ROL, así que ese orden no es decorativo: mover un
+ * elemento al principio cambia dónde cae la gente al entrar.
+ */
 export const obtenerPrimeraRuta = (rolUsuario) => {
   const rolNormalizado = rolUsuario.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
   const rutasPermitidas = RUTAS_POR_ROL[rolNormalizado] || [];

@@ -35,9 +35,14 @@ const inputReglaStyle = {
   }
 };
 
-const FECHA_HOY_REAL = new Date(2026, 5, 19);
+// Fecha real del equipo. Antes estaba fija en el 19/06/2026, así que el panel
+// abría en junio y ocultaba como "futuro" cualquier día posterior: los contratos
+// de meses siguientes quedaban invisibles y no había forma de navegar hasta ellos.
+const FECHA_HOY_REAL = new Date();
 
 const normalizarFecha = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+const PRIMER_DIA_DEL_MES_ACTUAL = new Date(FECHA_HOY_REAL.getFullYear(), FECHA_HOY_REAL.getMonth(), 1);
 
 const obtenerKeyFecha = (date) => {
   if (!date) return '';
@@ -73,8 +78,9 @@ const Comisiones = () => {
   const [equipo, setEquipo] = useState([]);
   const [modalInfoPago, setModalInfoPago] = useState(false);
   
-  const [mesFoco, setMesFoco] = useState(new Date(2026, 5, 1)); 
-  const [diaSeleccionado, setDiaSeleccionado] = useState(new Date(2026, 5, 1)); 
+  // Arranca en el mes en curso y con el día de hoy seleccionado.
+  const [mesFoco, setMesFoco] = useState(PRIMER_DIA_DEL_MES_ACTUAL);
+  const [diaSeleccionado, setDiaSeleccionado] = useState(normalizarFecha(FECHA_HOY_REAL));
 
   useEffect(() => {
     cargarDatosDesdeBD();
@@ -127,7 +133,7 @@ const Comisiones = () => {
   const cargarDatosDesdeBD = async () => {
     try {
       setLoading(true);
-      const canvResponse = await api.get('/canvaceadores/');
+      const canvResponse = await api.get('/usuarios/?rol=Canvaceador');
       const canvaceadores = canvResponse.data;
       
       const contratosResponse = await api.get('/contratos/');
@@ -151,13 +157,28 @@ const Comisiones = () => {
       }
       
       const equipoTransformado = canvaceadores.map(canv => {
-        const totalVentas = canv.contratos_pendientes || 0;
-        const volumenDinero = canv.volumen_pendiente || 0;
-        const nombreCompleto = `${canv.usuario || ''} ${canv.apellido || ''}`.trim() || `Agente #${canv.id}`;
-        
-        const contratosPendientesAgente = todosContratos.filter(
-          c => c.canvaceador_id === canv.id && c.comision_pagada === false
-        );
+        // `usuario` no existe en el modelo Usuario: el campo es `nombre`. Con la
+        // clave equivocada el nombre quedaba solo con el apellido.
+        const nombreCompleto = `${canv.nombre || ''} ${canv.apellido || ''}`.trim() || `Agente #${canv.id}`;
+
+        // La FK llega como id numérico, pero normalizamos ambos lados: si alguna
+        // respuesta lo devolviera como texto (o como objeto anidado), un `===`
+        // estricto descartaría contratos que sí son de este canvaceador.
+        const idCanv = Number(canv.id);
+        const contratosDelAgente = todosContratos.filter(c => {
+          const idContrato = typeof c.canvaceador_id === 'object'
+            ? c.canvaceador_id?.id
+            : c.canvaceador_id;
+          return Number(idContrato) === idCanv;
+        });
+
+        const contratosPendientesAgente = contratosDelAgente.filter(c => !c.comision_pagada);
+
+        // Preferimos lo que calcula el backend, pero si viniera vacío usamos el
+        // conteo local para no mostrar 0 contratos teniendo los datos a la mano.
+        const totalVentas = canv.contratos_pendientes || contratosPendientesAgente.length;
+        const volumenDinero = canv.volumen_pendiente ||
+          contratosPendientesAgente.reduce((suma, c) => suma + (parseFloat(c.monto_total) || 0), 0);
 
         const conteoPlanes = {};
         contratosPendientesAgente.forEach(contrato => {
@@ -190,12 +211,15 @@ const Comisiones = () => {
           nombre: nombreCompleto,
           zonaAsignada: canv.zona_asignada || `Zona ${canv.id}`,
           numeroEmpleado: canv.numero_empleado || `EMP-${canv.id}`,
-          totalVentas,       
-          volumenDinero,     
+          totalVentas,
+          volumenDinero,
+          // Todos los contratos que ha hecho, se haya pagado la comisión o no.
+          totalContratosHistorico: contratosDelAgente.length,
+          volumenHistorico: contratosDelAgente.reduce((s, c) => s + (parseFloat(c.monto_total) || 0), 0),
           horasApp,
           contratosPorFecha,
           estatus,
-          desgloseTooltip    
+          desgloseTooltip
         };
       });
       
@@ -369,6 +393,7 @@ const Comisiones = () => {
                   <TableHead sx={{ backgroundColor: '#f8fafc' }}>
                     <TableRow>
                       <TableCell sx={{ fontWeight: 600 }}>Canvaceador</TableCell>
+                      <TableCell align="center" sx={{ fontWeight: 600 }}>Contratos Totales</TableCell>
                       <TableCell align="center" sx={{ fontWeight: 600 }}>Ventas Pendientes</TableCell>
                       <TableCell align="center" sx={{ fontWeight: 600 }}>Volumen ($)</TableCell>
                       <TableCell align="center" sx={{ fontWeight: 600 }}>Comisión Aplicada</TableCell>
@@ -387,9 +412,9 @@ const Comisiones = () => {
                   </TableHead>
                   <TableBody>
                     {loading ? (
-                      <TableRow><TableCell colSpan={6} align="center" sx={{ py: 4 }}><CircularProgress size={24} /></TableCell></TableRow>
+                      <TableRow><TableCell colSpan={7} align="center" sx={{ py: 4 }}><CircularProgress size={24} /></TableCell></TableRow>
                     ) : equipo.length === 0 ? (
-                      <TableRow><TableCell colSpan={6} align="center" sx={{ py: 4 }}><Typography color="text.secondary">No hay canvaceadores registrados</Typography></TableCell></TableRow>
+                      <TableRow><TableCell colSpan={7} align="center" sx={{ py: 4 }}><Typography color="text.secondary">No hay canvaceadores registrados</Typography></TableCell></TableRow>
                     ) : equipo.map((agente) => {
                       const stats = calcularRendimientoAgente(agente.totalVentas, agente.volumenDinero);
                       return (
@@ -397,6 +422,20 @@ const Comisiones = () => {
                           <TableCell>
                             <Typography variant="body2" sx={{ fontWeight: 600 }}>{agente.nombre}</Typography>
                             <Chip label={agente.estatus} color={getRendimientoColor(agente.estatus)} size="small" sx={{ height: 16, fontSize: '0.65rem', mt: 0.5 }} />
+                          </TableCell>
+                          <TableCell align="center">
+                            <Tooltip
+                              title={`Todos los contratos cerrados por este canvaceador (histórico). Volumen: $${agente.volumenHistorico.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+                              arrow placement="top"
+                            >
+                              <Chip
+                                label={agente.totalContratosHistorico}
+                                size="small"
+                                color={agente.totalContratosHistorico > 0 ? 'primary' : 'default'}
+                                variant="outlined"
+                                sx={{ fontWeight: 800, cursor: 'help', minWidth: 48 }}
+                              />
+                            </Tooltip>
                           </TableCell>
                           <TableCell align="center">
                             <Tooltip title={agente.desgloseTooltip} arrow placement="top">
@@ -465,7 +504,6 @@ const Comisiones = () => {
                     </Box>
 
                     <Box sx={{ p: '16px' }}>
-                      {/* Control de Flechas del Mes (image_2b8361.png) */}
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, px: '4px' }}>
                         <Typography sx={{ fontSize: '15px', fontWeight: 600, color: '#1a1a1a', textTransform: 'capitalize' }}>
                           {NOMBRES_MESES[mesFoco.getMonth()]} de {mesFoco.getFullYear()}

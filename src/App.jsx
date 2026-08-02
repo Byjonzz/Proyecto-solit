@@ -11,81 +11,49 @@ import NuevoProspect from './components/Forms/NuevoProspect';
 import CanvaceadorRuta from './components/Dashboard/CanvaceadorRuta';
 import PlanCotizacion from './components/Ventas/PlanCotizacion';
 import SegumientoProspecto from './components/Ventas/SegumientoProspecto';
+import MisContratos from './components/Ventas/MisContratos';
 import AgendaInstalaciones from './components/Dashboard/AgendaInstalaciones';
 import TecnicoEjecucion from './components/Dashboard/TecnicoEjecucion';
 import Comisiones from './components/Dashboard/Comisiones';
+import BonoProactividad from './components/Dashboard/BonoProactividad';
 import AsignacionRutas from './components/Dashboard/AsignacionRutas';
 import VentaChips from './components/Ventas/VentaChips';
-import AsistenteFlotante from './components/AsistenteFlotante'; 
+import AsistenteFlotante from './components/AsistenteFlotante';
+import api from './services/api';
 
 const drawerWidth = 260;
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
+/**
+ * Inicia sesión contra el backend.
+ *
+ * Antes esta función descargaba /api/usuarios/ completo y comparaba la
+ * contraseña en el navegador: eso exponía las contraseñas de todo el personal a
+ * cualquiera que abriera esa URL. Ahora las credenciales se validan en el
+ * servidor y lo único que regresa es un token de sesión.
+ */
 const loginUsuario = async (email, password) => {
+  const respuesta = await fetch(`${API_BASE_URL}/login/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: email.trim(), password })
+  });
+
+  let datos = null;
   try {
-    const response = await fetch(`${API_BASE_URL}/usuarios/`);
-    if (!response.ok) {
-      throw new Error(`Error HTTP: ${response.status}`);
-    }
-    
-    let usuarios = await response.json();
-    if (!Array.isArray(usuarios)) {
-      usuarios = usuarios.results || usuarios.data || [];
-    }
-    
-    const emailLimpio = email.toLowerCase().trim();
-    const passwordLimpia = password.trim();
-    
-    const usuarioEncontrado = usuarios.find(u => {
-      const emailUsuario = (u.email || '').toLowerCase().trim();
-      const passwordUsuario = (u.password || '').trim();
-      return emailUsuario === emailLimpio && passwordUsuario === passwordLimpia;
-    });
-    
-    if (!usuarioEncontrado) {
-      throw new Error('Credenciales inválidas');
-    }
-    
-    const rol = usuarioEncontrado.rol?.toLowerCase().trim();
-    let perfilData = null;
-    
-    try {
-      if (rol === 'canvaceador') {
-        const canvResponse = await fetch(`${API_BASE_URL}/canvaceadores/`);
-        let canvaceadores = await canvResponse.json();
-        if (!Array.isArray(canvaceadores)) canvaceadores = canvaceadores.results || [];
-        perfilData = canvaceadores.find(c => c.usuario_id === usuarioEncontrado.id);
-      } else if (rol === 'tecnico') {
-        const tecResponse = await fetch(`${API_BASE_URL}/tecnicos/`);
-        let tecnicos = await tecResponse.json();
-        if (!Array.isArray(tecnicos)) tecnicos = tecnicos.results || [];
-        perfilData = tecnicos.find(t => t.usuario_id === usuarioEncontrado.id);
-      } else if (rol === 'supervisor') {
-        const supResponse = await fetch(`${API_BASE_URL}/supervisores/`);
-        let supervisores = await supResponse.json();
-        if (!Array.isArray(supervisores)) supervisores = supervisores.results || [];
-        perfilData = supervisores.find(s => s.usuario_id === usuarioEncontrado.id);
-      }
-    } catch (err) {
-    }
-    
-    const resultado = {
-      success: true,
-      usuario: {
-        id: usuarioEncontrado.id,
-        nombre: `${usuarioEncontrado.nombre} ${usuarioEncontrado.apellido}`,
-        email: usuarioEncontrado.email,
-        rol: rol,
-        perfil_id: perfilData?.id || usuarioEncontrado.id,
-        numero_empleado: perfilData?.numero_empleado || null
-      }
-    };
-    
-    return resultado;
-    
-  } catch (error) {
-    throw error;
+    datos = await respuesta.json();
+  } catch {
+    throw new Error('El servidor no respondió correctamente. Intenta de nuevo.');
   }
+
+  if (!respuesta.ok) {
+    throw new Error(datos?.error || 'Correo o contraseña incorrectos');
+  }
+
+  // El token viaja en cada petición mediante el interceptor de services/api.js.
+  localStorage.setItem('auth_token', datos.token);
+
+  return { success: true, usuario: datos.usuario };
 };
 
 function App() {
@@ -96,12 +64,34 @@ function App() {
 
   useEffect(() => {
     const usuarioGuardado = localStorage.getItem('usuario_actual');
-    if (usuarioGuardado) {
-      const usuario = JSON.parse(usuarioGuardado);
-      setUsuarioActual(usuario);
-      const primeraRuta = obtenerPrimeraRuta(usuario.rol);
-      setCurrentView(primeraRuta);
+    const token = localStorage.getItem('auth_token');
+
+    // Sin token no hay sesión válida aunque quede el usuario en el navegador
+    // (por ejemplo tras cerrar sesión desde otra pestaña).
+    if (!usuarioGuardado || !token) {
+      localStorage.removeItem('usuario_actual');
+      localStorage.removeItem('auth_token');
+      return;
     }
+
+    const usuario = JSON.parse(usuarioGuardado);
+    setUsuarioActual(usuario);
+    setCurrentView(obtenerPrimeraRuta(usuario.rol));
+
+    // Revalida el token contra el servidor: pudo expirar o haberse invalidado
+    // al iniciar sesión en otro dispositivo.
+    api.get('/yo/')
+      .then(({ data }) => {
+        localStorage.setItem('usuario_actual', JSON.stringify(data));
+        setUsuarioActual(data);
+      })
+      .catch((err) => {
+        if (err.response?.status === 401) {
+          localStorage.removeItem('usuario_actual');
+          localStorage.removeItem('auth_token');
+          setUsuarioActual(null);
+        }
+      });
   }, []);
 
   const handleLoginSuccess = (datosUsuario) => {
@@ -111,8 +101,16 @@ function App() {
     setCurrentView(primeraRuta);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    // Se avisa al servidor para que borre el token: si solo se limpiara el
+    // navegador, el token seguiría siendo válido para quien lo tuviera.
+    try {
+      await api.post('/logout/');
+    } catch {
+      // Sin red igual cerramos la sesión local.
+    }
     localStorage.removeItem('usuario_actual');
+    localStorage.removeItem('auth_token');
     setUsuarioActual(null);
     setAnchorEl(null);
     setCurrentView('canvaceo-dashboard');
@@ -141,10 +139,12 @@ function App() {
       case 'canvaceo-ruta': return <CanvaceadorRuta usuarioActual={usuarioActual} />;
       case 'ventas-contrato-directo': return <PlanCotizacion usuarioActual={usuarioActual} />;
       case 'ventas-seguimiento': return <SegumientoProspecto usuarioActual={usuarioActual} />;
+      case 'ventas-mis-contratos': return <MisContratos usuarioActual={usuarioActual} />;
       case 'ventas-de-chips': return <VentaChips usuarioActual={usuarioActual} />;
       case 'logistica-agenda': return <AgendaInstalaciones usuarioActual={usuarioActual} />;
       case 'tecnico-ejecucion': return <TecnicoEjecucion usuarioActual={usuarioActual} />;
       case 'admin-comisiones': return <Comisiones usuarioActual={usuarioActual} />;
+      case 'admin-bono-proactividad': return <BonoProactividad usuarioActual={usuarioActual} />;
       case 'admin-asignacion-rutas': return <AsignacionRutas usuarioActual={usuarioActual} />;
       case 'admin-rutas': return <AsignacionRutas usuarioActual={usuarioActual} />;
       case 'admin-planes': return <GestionPlanes usuarioActual={usuarioActual} />;

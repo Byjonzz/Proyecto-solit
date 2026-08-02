@@ -1,23 +1,37 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import SeleccionPlanes from '../Forms/SeleccionPlanes';
 import { useContratos } from '../../hooks/useContratos';
+import { usePlanes } from '../../hooks/usePlanes';
 import api from '../../services/api';
+import {
+  validarNombrePersona, validarTelefonoMx, validarCorreo,
+  validarINE, validarDireccion, validarTextoLibre
+} from '../../utils/validaciones';
+import { esPdf } from '../../utils/evidencias';
+import { obtenerDireccion } from '../../services/geocodeService';
+import BotonEvidencia from '../Forms/BotonEvidencia';
 
 import {
   Box, Paper, Typography, TextField, Button, MenuItem,
   Alert, Stack, Stepper, Step, StepLabel, StepContent, Divider,
   Radio, RadioGroup, FormControlLabel, FormControl, FormLabel,
   CircularProgress, InputAdornment, Tooltip, IconButton, Chip,
-  Checkbox, Card, CardContent
+  Checkbox, Card, CardContent,
+  Dialog, DialogTitle, DialogContent, DialogActions, List, ListItem, ListItemText
 } from '@mui/material';
 import {
   BorderColor, Save, CheckCircle, AddPhotoAlternate, InfoOutlined,
   MyLocation, ContentCopy, WhatsApp, PinDrop, LocalOffer, SimCard,
-  Receipt, Home 
+  Receipt, Home, HelpOutlined
 } from '@mui/icons-material';
-import { MapContainer, TileLayer, CircleMarker, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, CircleMarker, useMap, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
+
+// Grosor del trazo de la firma, en píxeles tal como se ven en pantalla. Al
+// dibujar se multiplica por la escala del canvas, así que el trazo se ve igual
+// de grueso en celular que en escritorio.
+const GROSOR_FIRMA_PX = 1.6;
 
 const pasosContrato = [
   { label: 'Datos Personales y Contacto', description: 'INE, teléfonos y correo (Obligatorios).' },
@@ -35,9 +49,35 @@ const ClicEnMapa = ({ alHacerClic }) => {
   return null;
 };
 
-const PlanCotizacion = ({ usuarioActual }) => {
+// Dentro de un <Dialog/> o de un <Collapse/> del Stepper, Leaflet mide el
+// contenedor cuando todavía tiene 0px de alto y las teselas salen grises.
+const AjustarTamanoMapa = () => {
+  const map = useMap();
+  useEffect(() => {
+    const timers = [150, 450, 800].map(ms => setTimeout(() => map.invalidateSize(), ms));
+    return () => timers.forEach(clearTimeout);
+  }, [map]);
+  return null;
+};
+const PlanCotizacion = ({
+  usuarioActual,
+  datosDesdeProspecto = null,
+  enModal = false,
+  onContratoCreado = null
+}) => {
   const location = useLocation();
   const { createContrato, loading: loadingContrato } = useContratos();
+
+  
+  const {
+    planesFibraSimetrica, planesFibraAsimetrica, planesSolitTV,
+    planesHibridos, planesAntenaWireless
+  } = usePlanes();
+
+  const todosLosPlanes = useMemo(() => [
+    ...planesFibraSimetrica, ...planesFibraAsimetrica, ...planesSolitTV,
+    ...planesHibridos, ...planesAntenaWireless
+  ], [planesFibraSimetrica, planesFibraAsimetrica, planesSolitTV, planesHibridos, planesAntenaWireless]);
 
   const [activeStep, setActiveStep] = useState(0);
   const [guardado, setGuardado] = useState(false);
@@ -45,6 +85,13 @@ const PlanCotizacion = ({ usuarioActual }) => {
   const [errorPlan, setErrorPlan] = useState(false);
   const [errorApi, setErrorApi] = useState(null);
   const [activarChip, setActivarChip] = useState(false);
+
+  // Errores por campo del paso en curso.
+  const [erroresPaso, setErroresPaso] = useState({});
+  // Falla del servicio de mapas al traducir coordenadas.
+  const [errorGeocode, setErrorGeocode] = useState(null);
+  // Resumen + confirmación antes de guardar.
+  const [confirmacionAbierta, setConfirmacionAbierta] = useState(false);
 
   const [formData, setFormData] = useState({
     ine: '',
@@ -74,37 +121,87 @@ const PlanCotizacion = ({ usuarioActual }) => {
   const canvasRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
 
-  useEffect(() => {
-    if (location.state && location.state.datosDesdeProspecto) {
-      const prospecto = location.state.datosDesdeProspecto;
-      setFormData(prev => ({
-        ...prev,
-        nombre: prospecto.nombre || '',
-        telefono1: prospecto.telefono1 || '',
-        calleNumero: prospecto.calleNumero || '',
-        referencias: prospecto.referencias || '',
-        plan: prospecto.plan || null
-      }));
+  const datosPrefill = datosDesdeProspecto || location.state?.datosDesdeProspecto || null;
+  const [planInteresPendiente, setPlanInteresPendiente] = useState(null);
+  const prefillAplicadoRef = useRef(null);
 
-      if (prospecto.coordenadasGPS) {
-        setMetodoUbicacion('gps');
-        setCoordenadas(prospecto.coordenadasGPS);
-      } else if (prospecto.calleNumero) {
-        setMetodoUbicacion('manual');
-      }
+  useEffect(() => {
+    if (!datosPrefill) return;
+    const huella = JSON.stringify(datosPrefill);
+    if (prefillAplicadoRef.current === huella) return;
+    prefillAplicadoRef.current = huella;
+
+    setFormData(prev => ({
+      ...prev,
+      nombre: datosPrefill.nombre || '',
+      telefono1: datosPrefill.telefono1 || '',
+      calleNumero: datosPrefill.calleNumero || '',
+      referencias: datosPrefill.referencias || '',
+      lat: datosPrefill.lat || '',
+      lng: datosPrefill.lng || ''
+    }));
+
+    setPlanInteresPendiente(datosPrefill.planNombre || datosPrefill.plan?.nombre || null);
+
+    if (datosPrefill.coordenadasGPS) {
+      setMetodoUbicacion('mapa');
+      setCoordenadas(datosPrefill.coordenadasGPS);
+    } else if (datosPrefill.calleNumero) {
+      setMetodoUbicacion('manual');
     }
-  }, [location.state]);
+  }, [datosPrefill]);
+  useEffect(() => {
+    if (!planInteresPendiente || todosLosPlanes.length === 0) return;
+
+    const objetivo = planInteresPendiente.trim().toLowerCase();
+    const encontrado = todosLosPlanes.find(
+      p => (p.nombre || '').trim().toLowerCase() === objetivo
+    );
+
+    if (encontrado) {
+      setFormData(prev => (prev.plan ? prev : { ...prev, plan: encontrado }));
+      setPlanInteresPendiente(null);
+    }
+  }, [planInteresPendiente, todosLosPlanes]);
+
+  /**
+   * Convierte la posición del puntero a coordenadas internas del canvas.
+   *
+   * El canvas tiene un mapa de bits fijo de 800x200 pero se muestra al 100% del
+   * ancho del contenedor (unos 430 px). Sin reescalar, una firma hecha al centro
+   * de la pantalla se dibujaba a ~27% del ancho interno, es decir pegada a la
+   * izquierda. Hay que multiplicar por la razón entre el tamaño interno y el
+   * mostrado.
+   */
+  const obtenerPuntoCanvas = (e, canvas) => {
+    const rect = canvas.getBoundingClientRect();
+
+    // En touch, clientX vive en e.touches; se revisa primero porque un toque en
+    // el borde izquierdo da clientX = 0, que con `||` se tomaría como ausente.
+    const fuente = e.touches?.[0] || e.changedTouches?.[0] || e;
+    const escalaX = canvas.width / rect.width;
+    const escalaY = canvas.height / rect.height;
+
+    return {
+      x: (fuente.clientX - rect.left) * escalaX,
+      y: (fuente.clientY - rect.top) * escalaY,
+      escalaX
+    };
+  };
 
   const startDrawing = (e) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    ctx.lineWidth = 3;
+    const { x, y, escalaX } = obtenerPuntoCanvas(e, canvas);
+
+    // El grosor también se escala para que el trazo se vea de ~3 px en pantalla
+    // sin importar el ancho al que se esté mostrando el canvas.
+    ctx.lineWidth = GROSOR_FIRMA_PX * escalaX;
     ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
     ctx.strokeStyle = '#0f172a';
-    const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX || (e.touches && e.touches[0].clientX)) - rect.left;
-    const y = (e.clientY || (e.touches && e.touches[0].clientY)) - rect.top;
+
     ctx.beginPath();
     ctx.moveTo(x, y);
     setIsDrawing(true);
@@ -116,9 +213,7 @@ const PlanCotizacion = ({ usuarioActual }) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX || (e.touches && e.touches[0].clientX)) - rect.left;
-    const y = (e.clientY || (e.touches && e.touches[0].clientY)) - rect.top;
+    const { x, y } = obtenerPuntoCanvas(e, canvas);
     ctx.lineTo(x, y);
     ctx.stroke();
   };
@@ -132,26 +227,33 @@ const PlanCotizacion = ({ usuarioActual }) => {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
   };
 
+  /**
+   * Traduce las coordenadas a una dirección.
+   *
+   * Si el servicio de mapas falla se avisa en pantalla en vez de dejar el campo
+   * vacío: antes, al guardar, la dirección terminaba siendo "Ubicación por
+   * mapa: 18.46, -97.39" y parecía que la traducción no existía.
+   */
   const consultarDireccionHumana = async (latitude, longitude) => {
-    try {
-      setLoadingGeocode(true);
-      const response = await api.get('/reverse-geocode/', {
-        params: { lat: latitude, lng: longitude }
-      });
+    setLoadingGeocode(true);
+    setErrorGeocode(null);
 
-      if (response.data && response.data.direccion) {
-        setFormData(prev => ({
-          ...prev,
-          calleNumero: response.data.direccion,
-          lat: latitude.toString(),
-          lng: longitude.toString()
-        }));
-      }
-    } catch (error) {
-      console.error("Error al traducir coordenadas en el backend:", error);
-    } finally {
-      setLoadingGeocode(false);
+    // Las coordenadas se guardan aunque falle la traducción: son el dato duro.
+    setFormData(prev => ({
+      ...prev,
+      lat: latitude.toString(),
+      lng: longitude.toString()
+    }));
+
+    const { direccion, error } = await obtenerDireccion(latitude, longitude);
+
+    if (direccion) {
+      setFormData(prev => ({ ...prev, calleNumero: direccion }));
+    } else {
+      setErrorGeocode(error);
+      console.warn('No se pudo traducir las coordenadas:', error);
     }
+    setLoadingGeocode(false);
   };
 
   const obtenerUbicacionGPS = () => {
@@ -197,19 +299,87 @@ const PlanCotizacion = ({ usuarioActual }) => {
     setErrorPlan(false);
   };
 
-  const handleNext = () => {
-    if (activeStep === 1) {
-      if (!formData.plan) {
-        setErrorPlan(true);
-        return;
-      }
-      if (metodoUbicacion === 'manual' && !formData.calleNumero.trim()) {
-        setErrorDireccion(true);
-        return;
+  /**
+   * Valida un paso y deja los mensajes junto a cada campo.
+   *
+   * Antes toda la validación vivía en handleSubmit: el vendedor llenaba los tres
+   * pasos, subía cuatro fotos, tomaba la firma del cliente y hasta entonces se
+   * enteraba de que el INE estaba mal. Ahora cada paso se valida al salir de él.
+   */
+  const validarPasoContrato = (paso) => {
+    let errores = {};
+
+    if (paso === 0) {
+      const e1 = validarINE(formData.ine);
+      const e2 = validarNombrePersona(formData.nombre);
+      const e3 = validarTelefonoMx(formData.telefono1);
+      const e4 = validarTelefonoMx(formData.telefono2, { obligatorio: false });
+      const e5 = validarCorreo(formData.correo);
+      if (e1) errores.ine = e1;
+      if (e2) errores.nombre = e2;
+      if (e3) errores.telefono1 = e3;
+      if (e4) errores.telefono2 = e4;
+      if (e5) errores.correo = e5;
+
+      // Dos teléfonos iguales suele ser copiar y pegar por salir del paso.
+      if (!e3 && !e4 && formData.telefono2 && formData.telefono1 === formData.telefono2) {
+        errores.telefono2 = 'El teléfono 2 no puede ser igual al teléfono 1';
       }
     }
-    setErrorDireccion(false);
-    setErrorPlan(false);
+
+    if (paso === 1) {
+      if (!formData.plan) errores.plan = 'Debes seleccionar un paquete comercial';
+
+      if (metodoUbicacion === 'manual') {
+        const eDir = validarDireccion(formData.calleNumero);
+        if (eDir) errores.direccion = eDir;
+      } else if (metodoUbicacion === 'gps' || metodoUbicacion === 'mapa') {
+        if (!coordenadas.includes(',')) {
+          errores.direccion = metodoUbicacion === 'gps'
+            ? 'Toca "Obtener ubicación" para capturar el GPS del domicilio'
+            : 'Toca el mapa para fijar el pin en el domicilio';
+        }
+      }
+
+      const eRef = validarTextoLibre(formData.referencias, { etiqueta: 'Las referencias' });
+      const eFach = validarTextoLibre(formData.detallesCasa, { etiqueta: 'Los detalles de fachada' });
+      if (eRef) errores.referencias = eRef;
+      if (eFach) errores.detallesCasa = eFach;
+    }
+
+    if (paso === 2) {
+      if (!fotoFrenteINE) errores.evidencias = 'Falta la foto del frente del INE';
+      else if (!fotoReversoINE) errores.evidencias = 'Falta la foto del reverso del INE';
+      else if (!fotoReciboLuz) errores.evidencias = 'Falta la foto del recibo de luz';
+      else if (!fotoFachada) errores.evidencias = 'Falta la foto de la fachada';
+
+      if (!errores.evidencias && firmaEstaVacia()) {
+        errores.firma = 'Falta la firma del cliente';
+      }
+    }
+
+    setErroresPaso(errores);
+    setErrorDireccion(Boolean(errores.direccion));
+    setErrorPlan(Boolean(errores.plan));
+
+    const mensajes = Object.values(errores);
+    setErrorApi(mensajes.length ? mensajes.join('\n') : null);
+    return mensajes.length === 0;
+  };
+
+  /** True si el canvas de la firma sigue en blanco. */
+  const firmaEstaVacia = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return true;
+    const ctx = canvas.getContext('2d');
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    return !imageData.data.some(channel => channel !== 0);
+  };
+
+  const handleNext = () => {
+    if (!validarPasoContrato(activeStep)) return;
+    setErroresPaso({});
+    setErrorApi(null);
     setActiveStep((prev) => prev + 1);
   };
 
@@ -224,8 +394,36 @@ const PlanCotizacion = ({ usuarioActual }) => {
       }
       
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setPhotoState(reader.result); 
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_WIDTH = 1024; 
+          const MAX_HEIGHT = 1024;
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > MAX_WIDTH) {
+              height *= MAX_WIDTH / width;
+              width = MAX_WIDTH;
+            }
+          } else {
+            if (height > MAX_HEIGHT) {
+              width *= MAX_HEIGHT / height;
+              height = MAX_HEIGHT;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.6);
+          setPhotoState(compressedBase64); 
+        };
+        img.src = event.target.result;
       };
       reader.onerror = () => {
         alert('Error al leer la imagen. Intenta de nuevo.');
@@ -234,53 +432,32 @@ const PlanCotizacion = ({ usuarioActual }) => {
     }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  /**
+   * Último paso: en vez de guardar, revalida todo y abre el resumen.
+   *
+   * Se revalidan también los pasos anteriores porque el vendedor pudo regresar y
+   * dejar un campo a medias después de haberlo pasado.
+   */
+  const handleSubmit = (e) => {
+    if (e?.preventDefault) e.preventDefault();
     setErrorApi(null);
 
-    if (!formData.ine || formData.ine.length !== 16) {
-      setErrorApi('El INE debe tener exactamente 16 dígitos');
-      return;
-    }
-    if (!formData.nombre.trim()) {
-      setErrorApi('El nombre completo es obligatorio');
-      return;
-    }
-    if (formData.telefono1.length !== 10) {
-      setErrorApi('El teléfono 1 debe tener exactamente 10 dígitos');
-      return;
-    }
-    if (formData.telefono2 && formData.telefono2.length !== 10) {
-      setErrorApi('El teléfono 2 debe tener exactamente 10 dígitos');
-      return;
-    }
-    if (!formData.correo.trim()) {
-      setErrorApi('El correo electrónico es obligatorio');
-      return;
-    }
-    if (!formData.plan) {
-      setErrorApi('Debes seleccionar un plan');
-      return;
-    }
-    if (metodoUbicacion === 'manual' && !formData.calleNumero.trim()) {
-      setErrorApi('La dirección es requerida');
-      setErrorDireccion(true);
-      setActiveStep(1);
-      return;
+    for (const paso of [0, 1, 2]) {
+      if (!validarPasoContrato(paso)) {
+        // Devolvemos al vendedor al paso donde está el problema.
+        setActiveStep(paso);
+        return;
+      }
     }
 
+    setConfirmacionAbierta(true);
+  };
+
+  /** Guarda el contrato. Solo se llama desde el diálogo de confirmación. */
+  const guardarContrato = async () => {
+    setErrorApi(null);
+    setConfirmacionAbierta(false);
     const canvas = canvasRef.current;
-    if (!canvas) {
-      setErrorApi('Error al obtener la firma');
-      return;
-    }
-    const ctx = canvas.getContext('2d');
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const isCanvasBlank = !imageData.data.some(channel => channel !== 0);
-    if (isCanvasBlank) {
-      setErrorApi('Por favor firma el contrato antes de continuar');
-      return;
-    }
 
     setGuardado(true);
 
@@ -352,6 +529,10 @@ const PlanCotizacion = ({ usuarioActual }) => {
       }
 
       await createContrato(datosContrato);
+      if (enModal) {
+        if (onContratoCreado) onContratoCreado(datosContrato);
+        return;
+      }
 
       setTimeout(() => {
         setGuardado(false);
@@ -388,6 +569,13 @@ const PlanCotizacion = ({ usuarioActual }) => {
     }
   };
 
+  const centroMapaContrato = useMemo(() => {
+    const lat = parseFloat(formData.lat);
+    const lng = parseFloat(formData.lng);
+    if (!isNaN(lat) && !isNaN(lng)) return [lat, lng];
+    return [18.4628, -97.3928];
+  }, [formData.lat, formData.lng]);
+
   const calcularTotales = () => {
     if (!formData.plan) return { instalacion: 0, primerMes: 0, chip: 0, total: 0 };
     const primerMes = formData.plan.precio || 0;
@@ -410,6 +598,8 @@ const PlanCotizacion = ({ usuarioActual }) => {
               slotProps={{ input: { maxLength: 16 } }}
               value={formData.ine}
               onChange={(e) => setFormData({ ...formData, ine: e.target.value.replace(/\D/g, '').slice(0, 16) })}
+              error={Boolean(erroresPaso.ine)}
+              helperText={erroresPaso.ine || `${formData.ine.length}/16 dígitos`}
             />
             <TextField
               label="Nombre Completo *"
@@ -418,6 +608,8 @@ const PlanCotizacion = ({ usuarioActual }) => {
               size="small"
               value={formData.nombre}
               onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
+              error={Boolean(erroresPaso.nombre)}
+              helperText={erroresPaso.nombre || 'Nombre y apellidos como aparecen en el INE'}
             />
             <TextField
               label="Teléfono 1 *"
@@ -430,6 +622,8 @@ const PlanCotizacion = ({ usuarioActual }) => {
                 ...formData,
                 telefono1: e.target.value.replace(/\D/g, '').slice(0, 10)
               })}
+              error={Boolean(erroresPaso.telefono1)}
+              helperText={erroresPaso.telefono1 || `${formData.telefono1.length}/10 dígitos`}
             />
             <TextField
               label="Teléfono 2"
@@ -441,6 +635,8 @@ const PlanCotizacion = ({ usuarioActual }) => {
                 ...formData,
                 telefono2: e.target.value.replace(/\D/g, '').slice(0, 10)
               })}
+              error={Boolean(erroresPaso.telefono2)}
+              helperText={erroresPaso.telefono2 || 'Opcional'}
             />
             <TextField
               label="Correo Electrónico *"
@@ -450,6 +646,8 @@ const PlanCotizacion = ({ usuarioActual }) => {
               size="small"
               value={formData.correo}
               onChange={(e) => setFormData({ ...formData, correo: e.target.value })}
+              error={Boolean(erroresPaso.correo)}
+              helperText={erroresPaso.correo || 'ejemplo@dominio.com'}
             />
           </Stack>
         );
@@ -460,8 +658,16 @@ const PlanCotizacion = ({ usuarioActual }) => {
               <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 2, color: '#1e293b', display: 'flex', alignItems: 'center', gap: 1 }}>
                 <LocalOffer color="primary" /> Selecciona el Paquete *
               </Typography>
+              {planInteresPendiente && todosLosPlanes.length > 0 && (
+                <Alert severity="warning" sx={{ mb: 2 }}>
+                  El prospecto mostró interés en <strong>{planInteresPendiente}</strong>, pero ese
+                  paquete ya no está en el catálogo activo. Selecciona el paquete vigente para que
+                  el contrato lleve el precio correcto.
+                </Alert>
+              )}
+
               <SeleccionPlanes planSeleccionado={formData.plan} onPlanSeleccionado={handleSeleccionarPlan} />
-              {errorPlan && (<Alert severity="error" sx={{ mt: 2 }}>Debes seleccionar un paquete comercial.</Alert>)}
+              {errorPlan && (<Alert severity="error" sx={{ mt: 2 }}>{erroresPaso.plan || 'Debes seleccionar un paquete comercial.'}</Alert>)}
             </Box>
             <Divider sx={{ my: 2 }} />
             <FormControl component="fieldset">
@@ -474,12 +680,40 @@ const PlanCotizacion = ({ usuarioActual }) => {
               </RadioGroup>
             </FormControl>
             <Box sx={{ p: 2, backgroundColor: '#f8fafc', borderRadius: 2, border: '1px solid #e2e8f0' }}>
+              {/* Falta capturar el GPS o el pin: el aviso va aquí, no al final */}
+              {erroresPaso.direccion && metodoUbicacion !== 'manual' && (
+                <Alert severity="error" sx={{ mb: 2 }}>{erroresPaso.direccion}</Alert>
+              )}
+
+              {/* El punto se capturó pero Google no devolvió la calle */}
+              {errorGeocode && !loadingGeocode && (
+                <Alert
+                  severity="warning"
+                  sx={{ mb: 2 }}
+                  action={
+                    <Button
+                      color="inherit" size="small"
+                      onClick={() => {
+                        const [la, ln] = coordenadas.split(',').map(v => parseFloat(v));
+                        if (!isNaN(la) && !isNaN(ln)) consultarDireccionHumana(la, ln);
+                      }}
+                    >
+                      Reintentar
+                    </Button>
+                  }
+                >
+                  <strong>No se pudo traducir la ubicación a una dirección.</strong> {errorGeocode}
+                  {' '}Las coordenadas sí quedaron guardadas; puedes reintentar o cambiar a
+                  "Dirección Manual" y escribirla.
+                </Alert>
+              )}
+
               {metodoUbicacion === 'manual' && (
                 <TextField
                   label="Dirección (Calle y Número)"
                   required
                   error={errorDireccion}
-                  helperText={errorDireccion ? "Requerido" : "Se llenará solo si usas GPS o Mapa"}
+                  helperText={erroresPaso.direccion || "Se llenará solo si usas GPS o Mapa"}
                   fullWidth
                   size="small"
                   value={formData.calleNumero}
@@ -545,8 +779,8 @@ const PlanCotizacion = ({ usuarioActual }) => {
 
                   <Box sx={{ width: '100%', height: 300, borderRadius: 2, overflow: 'hidden', mb: 2, border: '1px solid #cbd5e1' }}>
                     <MapContainer
-                      center={[18.4628, -97.3928]}
-                      zoom={14}
+                      center={centroMapaContrato}
+                      zoom={formData.lat ? 17 : 14}
                       zoomControl={true}
                       style={{ height: '100%', width: '100%' }}
                       preferCanvas={true}
@@ -555,6 +789,7 @@ const PlanCotizacion = ({ usuarioActual }) => {
                         url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
                         attribution='&copy; Google Maps'
                       />
+                      <AjustarTamanoMapa />
 
                       <ClicEnMapa alHacerClic={(lat, lng) => {
                         setCoordenadas(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
@@ -595,6 +830,8 @@ const PlanCotizacion = ({ usuarioActual }) => {
                   size="small"
                   value={formData.referencias}
                   onChange={(e) => setFormData({ ...formData, referencias: e.target.value })}
+                  error={Boolean(erroresPaso.referencias)}
+                  helperText={erroresPaso.referencias || 'Opcional'}
                 />
                 <TextField
                   label="Detalles de Fachada"
@@ -604,6 +841,8 @@ const PlanCotizacion = ({ usuarioActual }) => {
                   size="small"
                   value={formData.detallesCasa}
                   onChange={(e) => setFormData({ ...formData, detallesCasa: e.target.value })}
+                  error={Boolean(erroresPaso.detallesCasa)}
+                  helperText={erroresPaso.detallesCasa || 'Opcional'}
                 />
               </Stack>
             </Box>
@@ -613,6 +852,12 @@ const PlanCotizacion = ({ usuarioActual }) => {
         const totales = calcularTotales();
         return (
           <Box sx={{ mt: 2 }}>
+            {(erroresPaso.evidencias || erroresPaso.firma) && (
+              <Alert severity="error" sx={{ mb: 2 }}>
+                {erroresPaso.evidencias || erroresPaso.firma}
+              </Alert>
+            )}
+
             <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 2 }}>Evidencias Fotográficas</Typography>
             
             <Typography variant="caption" sx={{ fontWeight: 600, mb: 1, display: 'block', color: '#475569' }}>
@@ -646,30 +891,36 @@ const PlanCotizacion = ({ usuarioActual }) => {
             <Typography variant="caption" sx={{ fontWeight: 600, mb: 1, display: 'block', color: '#475569' }}>
               Evidencias del Domicilio
             </Typography>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 3 }}>
-              <Button 
-                variant={fotoReciboLuz ? "contained" : "outlined"} 
-                color={fotoReciboLuz ? "success" : "warning"} 
-                component="label" 
-                startIcon={<Receipt />} 
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 1 }}>
+              {/* El comprobante de domicilio suele venir ya digitalizado (el PDF
+                  que el cliente descarga de CFE), así que este botón pregunta si
+                  se toma foto o se sube el archivo. Va al mismo campo. */}
+              <BotonEvidencia
+                etiqueta={fotoReciboLuz ? 'Comprobante Cargado' : 'Comprobante de Domicilio'}
+                cargada={Boolean(fotoReciboLuz)}
+                permitirPdf
+                icono={<Receipt />}
+                color="warning"
                 fullWidth
                 sx={{ py: 2 }}
-              >
-                {fotoReciboLuz ? "✓ Recibo de Luz Cargado" : "Foto Recibo de Luz"}
-                <input type="file" hidden accept="image/*" capture="environment" onChange={(e) => handleImageUpload(e, setFotoReciboLuz)} />
-              </Button>
-              <Button 
-                variant={fotoFachada ? "contained" : "outlined"} 
-                color={fotoFachada ? "success" : "info"} 
-                component="label" 
-                startIcon={<Home />} 
+                onArchivo={(dataUri) => { setFotoReciboLuz(dataUri); setErrorApi(null); }}
+                onError={(mensaje) => setErrorApi(mensaje)}
+              />
+              <BotonEvidencia
+                etiqueta={fotoFachada ? 'Fachada Cargada' : 'Foto Fachada'}
+                cargada={Boolean(fotoFachada)}
+                icono={<Home />}
+                color="info"
                 fullWidth
                 sx={{ py: 2 }}
-              >
-                {fotoFachada ? "✓ Fachada Cargada" : " Foto Fachada"}
-                <input type="file" hidden accept="image/*" capture="environment" onChange={(e) => handleImageUpload(e, setFotoFachada)} />
-              </Button>
+                onArchivo={(dataUri) => { setFotoFachada(dataUri); setErrorApi(null); }}
+                onError={(mensaje) => setErrorApi(mensaje)}
+              />
             </Stack>
+
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 3 }}>
+              En el comprobante de domicilio puedes tomar la foto o subir el PDF digital.
+            </Typography>
 
             {(fotoFrenteINE || fotoReversoINE || fotoReciboLuz || fotoFachada) && (
               <Box sx={{ mb: 3, p: 2, bgcolor: '#f0f9ff', borderRadius: 2, border: '1px solid #bae6fd' }}>
@@ -679,7 +930,12 @@ const PlanCotizacion = ({ usuarioActual }) => {
                 <Stack direction="row" spacing={1} flexWrap="wrap" gap={1}>
                   {fotoFrenteINE && <Chip label="✓ Frente INE" color="success" size="small" />}
                   {fotoReversoINE && <Chip label="✓ Reverso INE" color="success" size="small" />}
-                  {fotoReciboLuz && <Chip label="✓ Recibo Luz" color="warning" size="small" />}
+                  {fotoReciboLuz && (
+                    <Chip
+                      label={`✓ Comprobante (${esPdf(fotoReciboLuz) ? 'PDF' : 'foto'})`}
+                      color="warning" size="small"
+                    />
+                  )}
                   {fotoFachada && <Chip label="✓ Fachada" color="info" size="small" />}
                 </Stack>
               </Box>
@@ -787,7 +1043,6 @@ const PlanCotizacion = ({ usuarioActual }) => {
             </Box>
             <Stack direction="row" spacing={2} sx={{ mt: 1 }}>
               <Button size="small" onClick={limpiarFirma} color="error">Limpiar Firma</Button>
-              <Button size="small" onClick={() => window.print()} color="secondary">Generar PDF</Button>
             </Stack>
           </Box>
         );
@@ -797,9 +1052,15 @@ const PlanCotizacion = ({ usuarioActual }) => {
   };
 
   return (
-    <Box sx={{ maxWidth: 900, margin: 'auto', p: 1 }}>
-      <Typography variant="h5" sx={{ fontWeight: 700, mb: 3 }}>Contrato y Firma</Typography>
-      <Paper variant="outlined" sx={{ p: 4, borderRadius: 3 }}>
+    <Box sx={{ maxWidth: enModal ? '100%' : 900, margin: enModal ? 0 : 'auto', p: enModal ? 0 : 1 }}>
+      {!enModal && (
+        <Typography variant="h5" sx={{ fontWeight: 700, mb: 3 }}>Contrato y Firma</Typography>
+      )}
+      <Paper
+        variant={enModal ? 'elevation' : 'outlined'}
+        elevation={0}
+        sx={{ p: enModal ? 0 : 4, borderRadius: 3 }}
+      >
         <Stepper activeStep={activeStep} orientation="vertical">
           {pasosContrato.map((paso, index) => (
             <Step key={paso.label}>
@@ -816,7 +1077,7 @@ const PlanCotizacion = ({ usuarioActual }) => {
                     onClick={index === 2 ? handleSubmit : handleNext}
                     disabled={loadingContrato}
                   >
-                    {loadingContrato ? <CircularProgress size={20} color="inherit" /> : (index === 2 ? 'Finalizar' : 'Siguiente')}
+                    {loadingContrato ? <CircularProgress size={20} color="inherit" /> : (index === 2 ? 'Revisar y Finalizar' : 'Siguiente')}
                   </Button>
                   <Button disabled={index === 0} onClick={handleBack} sx={{ ml: 1 }}>Atrás</Button>
                 </Box>
@@ -837,6 +1098,96 @@ const PlanCotizacion = ({ usuarioActual }) => {
           </Alert>
         )}
       </Paper>
+
+      {/* Resumen y confirmación antes de guardar el contrato */}
+      <Dialog
+        open={confirmacionAbierta}
+        onClose={() => !loadingContrato && setConfirmacionAbierta(false)}
+        maxWidth="sm"
+        fullWidth
+        slotProps={{ paper: { sx: { borderRadius: 3 } } }}
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, fontWeight: 700 }}>
+          <HelpOutlined color="primary" />
+          ¿Guardar este contrato?
+        </DialogTitle>
+
+        <DialogContent dividers>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            Revisa los datos con el cliente antes de guardar. Una vez guardado pasa a
+            Agenda de Instalaciones.
+          </Typography>
+
+          <List dense disablePadding>
+            <ListItem disableGutters divider>
+              <ListItemText primary="Cliente" secondary={formData.nombre}
+                secondaryTypographyProps={{ fontWeight: 700, color: '#0f172a' }} />
+            </ListItem>
+            <ListItem disableGutters divider>
+              <ListItemText primary="INE" secondary={formData.ine}
+                secondaryTypographyProps={{ fontWeight: 700, color: '#0f172a' }} />
+            </ListItem>
+            <ListItem disableGutters divider>
+              <ListItemText
+                primary="Contacto"
+                secondary={`${formData.telefono1}${formData.telefono2 ? ` / ${formData.telefono2}` : ''} · ${formData.correo}`}
+                secondaryTypographyProps={{ fontWeight: 700, color: '#0f172a' }}
+              />
+            </ListItem>
+            <ListItem disableGutters divider>
+              <ListItemText
+                primary="Domicilio"
+                secondary={formData.calleNumero || `Ubicación por ${metodoUbicacion}: ${coordenadas || 'sin capturar'}`}
+                secondaryTypographyProps={{ fontWeight: 700, color: '#0f172a' }}
+              />
+            </ListItem>
+            <ListItem disableGutters divider>
+              <ListItemText primary="Plan contratado" secondary={formData.plan?.nombre || '—'}
+                secondaryTypographyProps={{ fontWeight: 700, color: '#0f172a' }} />
+            </ListItem>
+            <ListItem disableGutters>
+              <ListItemText primary="Evidencias" secondary="INE frente y reverso, recibo de luz, fachada y firma" />
+              <CheckCircle sx={{ color: '#16a34a' }} />
+            </ListItem>
+          </List>
+
+          {/* El total es lo que más importa revisar en voz alta con el cliente */}
+          <Box sx={{ mt: 2, p: 2, bgcolor: '#ecfdf5', borderRadius: 2, border: '1px solid #a7f3d0' }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+              <Typography variant="body2">Primer mes:</Typography>
+              <Typography variant="body2">${calcularTotales().primerMes.toFixed(2)}</Typography>
+            </Box>
+            {activarChip && (
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                <Typography variant="body2">Chip SIM:</Typography>
+                <Typography variant="body2">$80.00</Typography>
+              </Box>
+            )}
+            <Divider sx={{ my: 1 }} />
+            <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#065f46' }}>Total a cobrar:</Typography>
+              <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#059669', fontSize: '1.15rem' }}>
+                ${calcularTotales().total.toFixed(2)}
+              </Typography>
+            </Box>
+          </Box>
+        </DialogContent>
+
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={() => setConfirmacionAbierta(false)} disabled={loadingContrato} color="inherit">
+            Revisar de nuevo
+          </Button>
+          <Button
+            variant="contained"
+            color="success"
+            disabled={loadingContrato}
+            startIcon={loadingContrato ? <CircularProgress size={16} color="inherit" /> : <CheckCircle />}
+            onClick={guardarContrato}
+          >
+            {loadingContrato ? 'Guardando...' : 'Sí, guardar contrato'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };
