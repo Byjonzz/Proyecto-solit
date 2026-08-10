@@ -268,7 +268,7 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
           hora_asignada: horaEncontrada, 
           fecha_completada: instalacionBD?.fecha_completada || null,
           
-          nota_atencion_clientes: instalacionBD?.nota || contrato.nota || '',
+          nota_atencion_clientes: instalacionBD?.nota || contrato.nota_logistica || '',
           observaciones_tecnico: instalacionBD?.observaciones || '',
 
           fecha_aceptacion: instalacionBD?.fecha_aceptacion || null,
@@ -1094,6 +1094,20 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
                     InputProps={{ readOnly: true }}
                   />
                 </Box>
+
+                {/* Aviso que dejó ventas al capturar el contrato: casi siempre
+                    es qué hay que pedirle al cliente durante la visita. Va antes
+                    del checklist para que se lea al abrir, no al cerrar. */}
+                {instalacionSeleccionada.contrato?.notas && (
+                  <Alert severity="warning" sx={{ borderRadius: 2 }}>
+                    <Typography variant="caption" sx={{ fontWeight: 700, display: 'block' }}>
+                      Nota de ventas
+                    </Typography>
+                    <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>
+                      {instalacionSeleccionada.contrato.notas}
+                    </Typography>
+                  </Alert>
+                )}
 
                 {!vistaAdmin && instalacionSeleccionada.estado !== 'Completado' && instalacionSeleccionada.estado !== 'Completada' && (
                   <>

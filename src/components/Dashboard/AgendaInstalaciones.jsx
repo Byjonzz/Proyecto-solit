@@ -312,7 +312,11 @@ const AgendaInstalaciones = () => {
       
       telefono: contrato.telefono1,
       correo: contrato.correo,
-      nota: instalacionDB?.nota || contrato.nota || '', 
+      nota: instalacionDB?.nota || contrato.nota_logistica || '',
+      // Aviso que dejó ventas al capturar el contrato. Va aparte de `nota`, que
+      // es la que escribe logística al agendar: si compartieran campo, agendar
+      // la cita borraría de la vista lo que avisó ventas.
+      notas_contrato: contrato.notas || '',
       tecnico_id: instalacionDB?.tecnico_id || contrato.tecnico_id,
       foto_ine_frente: contrato.foto_ine_frente || null,
       foto_ine_reverso: contrato.foto_ine_reverso || null,
@@ -351,6 +355,9 @@ const AgendaInstalaciones = () => {
         return true;
     }
   });
+
+  // Columnas visibles según el filtro; la usan los colSpan de la tabla.
+  const totalColumnas = filtroEstatus === 'completadas' ? 9 : filtroEstatus === 'asignadas' ? 8 : 7;
 
   const ordenSeguimiento = seguimientoOrden
     ? (ordenes.find(o => o.instalacion_id === seguimientoOrden.instalacion_id) || seguimientoOrden)
@@ -492,7 +499,9 @@ const AgendaInstalaciones = () => {
         correo: datosEditar.correo,
         calle_numero: datosEditar.calle_numero,
         plan_contratado: datosEditar.plan_contratado,
-        nota: datosEditar.nota 
+        // El contrato guarda la nota siempre; la instalación es solo una copia
+        // para el técnico y puede no existir todavía.
+        nota_logistica: datosEditar.nota
       };
 
       await api.patch(`/contratos/${ordenSeleccionada.contrato_id}/`, datosContrato);
@@ -523,12 +532,14 @@ const AgendaInstalaciones = () => {
     setGuardandoNotas(true);
 
     try {
+      // La nota va siempre al contrato: si todavía no hay instalación (contrato
+      // pendiente de agendar), es el único lugar donde puede vivir.
+      await api.patch(`/contratos/${ordenSeleccionada.contrato_id}/`, {
+        nota_logistica: notaInstalacion
+      });
+
       if (ordenSeleccionada.instalacion_id) {
         await api.patch(`/instalaciones/${ordenSeleccionada.instalacion_id}/`, {
-          nota: notaInstalacion
-        });
-      } else {
-        await api.patch(`/contratos/${ordenSeleccionada.contrato_id}/`, {
           nota: notaInstalacion
         });
       }
@@ -639,7 +650,10 @@ const AgendaInstalaciones = () => {
 
       await api.patch(`/contratos/${ordenSeleccionada.contrato_id}/`, {
         estatus: 'Asignado',
-        tecnico_id: tecnico 
+        tecnico_id: tecnico,
+        // Va en el mismo PATCH que ya se hacía: mantiene la copia del contrato
+        // al día para que no se separe de la de la instalación.
+        nota_logistica: notaInstalacion
       });
 
       setMensajeExito(true);
@@ -794,7 +808,7 @@ const AgendaInstalaciones = () => {
           <TableBody>
             {ordenesFiltradas.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={filtroEstatus === 'completadas' ? 9 : filtroEstatus === 'asignadas' ? 8 : 7} align="center" sx={{ py: 4 }}>
+                <TableCell colSpan={totalColumnas} align="center" sx={{ py: 4 }}>
                   <Typography variant="body2" color="text.secondary">
                     No hay contratos {filtroEstatus} para mostrar
                   </Typography>
@@ -802,7 +816,13 @@ const AgendaInstalaciones = () => {
               </TableRow>
             ) : (
               ordenesFiltradas.map((orden) => (
-                <TableRow key={orden.id} hover>
+                <React.Fragment key={orden.id}>
+                {/* Con nota de ventas abajo, esta fila pierde su borde inferior
+                    para que las dos se lean como un solo renglón. */}
+                <TableRow
+                  hover
+                  sx={orden.notas_contrato ? { '& > td': { borderBottom: 'none' } } : undefined}
+                >
                   <TableCell sx={{ fontWeight: 700, color: '#1d4ed8' }}>{orden.id}</TableCell>
                   <TableCell sx={{ fontWeight: 600 }}>{orden.cliente}</TableCell>
                   <TableCell>{orden.plan}</TableCell>
@@ -1020,6 +1040,29 @@ const AgendaInstalaciones = () => {
                     )}
                   </TableCell>
                 </TableRow>
+
+                {orden.notas_contrato && (
+                  <TableRow>
+                    <TableCell colSpan={totalColumnas} sx={{ pt: 0 }}>
+                      <Box sx={{
+                        display: 'flex', alignItems: 'flex-start', gap: 1,
+                        p: 1.5, borderRadius: 1.5,
+                        bgcolor: '#fffbeb', border: '1px solid #fde68a'
+                      }}>
+                        <CommentOutlined sx={{ color: '#b45309', fontSize: 20, mt: 0.2 }} />
+                        <Box>
+                          <Typography variant="caption" sx={{ fontWeight: 700, color: '#b45309', display: 'block' }}>
+                            Nota de ventas
+                          </Typography>
+                          <Typography variant="body2" sx={{ color: '#78350f', whiteSpace: 'pre-line' }}>
+                            {orden.notas_contrato}
+                          </Typography>
+                        </Box>
+                      </Box>
+                    </TableCell>
+                  </TableRow>
+                )}
+                </React.Fragment>
               ))
             )}
           </TableBody>
@@ -1328,6 +1371,19 @@ const AgendaInstalaciones = () => {
         </DialogTitle>
         
         <DialogContent dividers sx={{ display: 'flex', flexDirection: 'column', gap: 3, py: 3, maxHeight: 700, overflow: 'auto' }}>
+          {/* Lo que avisó ventas al capturar. Aquí no se edita: es el recado de
+              quien vendió, no un campo de logística. */}
+          {ordenSeleccionada?.notas_contrato && (
+            <Alert severity="warning" icon={<CommentOutlined />} sx={{ borderRadius: 2 }}>
+              <Typography variant="caption" sx={{ fontWeight: 700, display: 'block' }}>
+                Nota de ventas
+              </Typography>
+              <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>
+                {ordenSeleccionada.notas_contrato}
+              </Typography>
+            </Alert>
+          )}
+
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, md: 6 }}>
               <TextField

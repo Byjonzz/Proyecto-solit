@@ -33,6 +33,12 @@ import 'leaflet/dist/leaflet.css';
 // de grueso en celular que en escritorio.
 const GROSOR_FIRMA_PX = 1.6;
 
+// Nota de un clic para el caso más común: el cliente no traía el comprobante.
+// Se ofrece hecha para que la nota llegue a logística redactada igual siempre y
+// el vendedor no la deje en blanco por pereza.
+const NOTA_SIN_COMPROBANTE =
+  'El cliente no tenía el comprobante de domicilio a la mano: pedírselo el día de la instalación.';
+
 const pasosContrato = [
   { label: 'Datos Personales y Contacto', description: 'INE, teléfonos y correo (Obligatorios).' },
   { label: 'Ubicación y Plan', description: 'Dirección, referencias y paquete comercial.' },
@@ -104,7 +110,8 @@ const PlanCotizacion = ({
     lat: '',
     lng: '',
     referencias: '',
-    detallesCasa: ''
+    detallesCasa: '',
+    notas: ''
   });
 
   const [metodoUbicacion, setMetodoUbicacion] = useState('manual');
@@ -386,6 +393,9 @@ const PlanCotizacion = ({
       if (!errores.evidencias && firmaEstaVacia()) {
         errores.firma = 'Falta la firma del cliente';
       }
+
+      const eNotas = validarTextoLibre(formData.notas, { etiqueta: 'Las notas' });
+      if (eNotas) errores.notas = eNotas;
     }
 
     setErroresPaso(errores);
@@ -465,6 +475,18 @@ const PlanCotizacion = ({
     }
   };
 
+  /** Agrega la nota estándar del comprobante sin pisar lo que ya se escribió. */
+  const agregarNotaComprobante = () => {
+    setFormData(prev => {
+      const actual = (prev.notas || '').trim();
+      if (actual.includes(NOTA_SIN_COMPROBANTE)) return prev;
+      return {
+        ...prev,
+        notas: actual ? `${actual}\n${NOTA_SIN_COMPROBANTE}` : NOTA_SIN_COMPROBANTE
+      };
+    });
+  };
+
   /**
    * Último paso: en vez de guardar, revalida todo y abre el resumen.
    *
@@ -531,6 +553,7 @@ const PlanCotizacion = ({
         calle_numero: calleNumeroFinal,
         referencias: formData.referencias || '',
         detalles_fachada: formData.detallesCasa || '',
+        notas: formData.notas.trim(),
         plan_contratado: formData.plan.nombre,
         monto_instalacion: 0,
         monto_primer_mes: montoPrimerMes,
@@ -582,7 +605,7 @@ const PlanCotizacion = ({
         setFormData({
           ine: '', nombre: '', telefono1: '', telefono2: '',
           correo: '', plan: null, calleNumero: '',
-          referencias: '', detallesCasa: ''
+          referencias: '', detallesCasa: '', notas: ''
         });
         setCoordenadas('');
         setMetodoUbicacion('manual');
@@ -984,6 +1007,41 @@ const PlanCotizacion = ({
               </Box>
             )}
 
+            {/* Notas de ventas. El caso que originó el campo es el comprobante:
+                si no se capturó, logística lo ve en su agenda y el técnico sabe
+                que tiene que pedirlo el día de la instalación. */}
+            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+              Notas para logística y el técnico
+            </Typography>
+
+            {!fotoReciboLuz && (
+              <Alert
+                severity="warning"
+                sx={{ mb: 1.5 }}
+                action={
+                  <Button color="inherit" size="small" onClick={agregarNotaComprobante}>
+                    Agregar nota
+                  </Button>
+                }
+              >
+                Este contrato va sin comprobante de domicilio. Deja una nota para que el
+                técnico se lo pida al cliente el día de la instalación.
+              </Alert>
+            )}
+
+            <TextField
+              label="Notas"
+              multiline
+              rows={3}
+              fullWidth
+              size="small"
+              value={formData.notas}
+              onChange={(e) => setFormData({ ...formData, notas: e.target.value })}
+              error={Boolean(erroresPaso.notas)}
+              helperText={erroresPaso.notas || 'Opcional. Aparece en la agenda de logística y en la pantalla del técnico.'}
+              sx={{ mb: 3 }}
+            />
+
             <Card variant="outlined" sx={{ mb: 3, borderColor: '#0ea5e9', bgcolor: '#f0f9ff' }}>
               <CardContent>
                 <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
@@ -1188,13 +1246,25 @@ const PlanCotizacion = ({
               <ListItemText primary="Plan contratado" secondary={formData.plan?.nombre || '—'}
                 secondaryTypographyProps={{ fontWeight: 700, color: '#0f172a' }} />
             </ListItem>
-            <ListItem disableGutters>
+            <ListItem disableGutters divider={Boolean(formData.notas.trim())}>
               <ListItemText primary="Evidencias"
                 secondary={fotoReciboLuz
                   ? 'INE frente y reverso, comprobante de domicilio, fachada y firma'
                   : 'INE frente y reverso, fachada y firma — el comprobante de domicilio lo captura el técnico en la instalación'} />
               <CheckCircle sx={{ color: '#16a34a' }} />
             </ListItem>
+
+            {formData.notas.trim() && (
+              <ListItem disableGutters>
+                <ListItemText
+                  primary="Notas para logística"
+                  secondary={formData.notas.trim()}
+                  secondaryTypographyProps={{
+                    fontWeight: 700, color: '#0f172a', whiteSpace: 'pre-line'
+                  }}
+                />
+              </ListItem>
+            )}
           </List>
 
           {/* El total es lo que más importa revisar en voz alta con el cliente */}
