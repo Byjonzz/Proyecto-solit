@@ -81,7 +81,9 @@ const MisContratos = ({ usuarioActual }) => {
     if (!iso) return 'Sin fecha';
     return new Date(iso).toLocaleString('es-MX', {
       year: 'numeric', month: 'short', day: 'numeric',
-      hour: '2-digit', minute: '2-digit'
+      hour: '2-digit', minute: '2-digit',
+      // Hora de México siempre, aunque el dispositivo tenga otra zona.
+      timeZone: 'America/Mexico_City'
     });
   };
 

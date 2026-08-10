@@ -37,7 +37,6 @@ export const RUTAS_POR_ROL = {
   [ROLES.LOGISTICA]: [
     'logistica-agenda',
     'logistica-seguimiento',
-    'ventas-seguimiento'
   ],
   
   

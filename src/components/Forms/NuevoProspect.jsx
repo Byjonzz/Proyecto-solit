@@ -17,6 +17,7 @@ import 'leaflet/dist/leaflet.css';
 import api from '../../services/api';
 
 import { obtenerDireccion } from '../../services/geocodeService';
+import { obtenerPosicionActual } from '../../utils/geo';
 import { useProspectos } from '../../hooks/useProspectos';
 import { usePlanes } from '../../hooks/usePlanes';
 import {
@@ -593,21 +594,19 @@ const NuevoProspect = ({
     console.warn('No se pudo traducir las coordenadas:', error);
   };
 
-  const obtenerUbicacionGPS = () => {
+  const obtenerUbicacionGPS = async () => {
     setLoadingGps(true);
-    if ("geolocation" in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const lat = position.coords.latitude;
-          const lng = position.coords.longitude;
-          setCoordenadas(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
-          setLoadingGps(false);
-          consultarDireccionHumana(lat, lng);
-        },
-        (error) => { alert("Permite el acceso a la ubicación."); setLoadingGps(false); },
-        { enableHighAccuracy: true }
-      );
-    } else { alert("Navegador no soportado."); setLoadingGps(false); }
+    // El helper explica la causa real cuando no hay GPS (página http, permiso
+    // negado, etc.); antes siempre se culpaba al permiso y el canvaceador no
+    // sabía que en realidad el navegador estaba bloqueando la ubicación.
+    const { punto, error } = await obtenerPosicionActual();
+    setLoadingGps(false);
+    if (!punto) {
+      alert(error);
+      return;
+    }
+    setCoordenadas(`${punto.lat.toFixed(6)}, ${punto.lng.toFixed(6)}`);
+    consultarDireccionHumana(punto.lat, punto.lng);
   };
 
   const copiarLinkCliente = () => {

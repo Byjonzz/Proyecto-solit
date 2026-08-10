@@ -12,12 +12,42 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import * as turf from '@turf/turf';
 
-import api from '../../services/api';
 import NuevoProspect from '../Forms/NuevoProspect';
+import { motivoGpsNoDisponible, obtenerUbicacionGoogle } from '../../utils/geo';
+import { obtenerCobertura } from '../../services/coberturaService';
 
-let cachedCajasActivas = null;
-let cachedCajasInactivas = null;
-let cachedPoligonoCobertura = null;
+// Se guarda la descarga en el módulo para que ir y venir entre pantallas no
+// repita la petición dentro de la misma sesión.
+let cachedCobertura = null;
+
+// Las cajas se agrupan por lo que dice la base de datos, no por el estado
+// operativo: verde solo para implantadas y certificadas (puestas en la calle y
+// revisadas), que son las que cuentan como cobertura. El estado que manda
+// ispcore igual se muestra en el popup, porque ahí está el detalle útil.
+const ETIQUETAS_ESTADO = {
+  viable: 'Viable · con puertos libres',
+  saturada: 'Saturada · sin puertos libres',
+  sin_splitter: 'Instalada sin splitter',
+  proyectada: 'Proyectada · aún no instalada'
+};
+
+const COLOR_CERTIFICADA = { color: '#16a34a', fillColor: '#22c55e' };
+const COLOR_SIN_CERTIFICAR = { color: '#d97706', fillColor: '#f59e0b' };
+const COLOR_NO_IMPLANTADA = { color: '#64748b', fillColor: '#94a3b8' };
+
+const marcaDeCaja = (caja) => {
+  if (!caja.implanted) return '⚪ No implantada';
+  return caja.certified ? '🟢 Implantada y certificada' : '🟠 Implantada, sin certificar';
+};
+
+const popupDeCaja = (caja) => {
+  const estado = ETIQUETAS_ESTADO[caja.estado] || caja.estado || 'Estado desconocido';
+  const puertos = caja.puertos_totales
+    ? `<br/>Puertos: <b>${caja.puertos_libres ?? 0}</b> libres de ${caja.puertos_totales}`
+    : '';
+  const problema = caja.has_problem ? '<br/>⚠️ Reportada con problema' : '';
+  return `<b>${caja.name || 'Caja'}</b><br/>${marcaDeCaja(caja)}<br/>${estado}${puertos}${problema}`;
+};
 const estilosPulsoCanvaceador = `
   @keyframes pulsoCanvaceador {
     0%   { transform: scale(0.4); opacity: 0.60; }
@@ -66,14 +96,17 @@ const FixMapSize = () => {
 };
 
 const MapaCobertura = ({ usuarioActual }) => {
-  const [poligonoCobertura, setPoligonoCobertura] = useState(cachedPoligonoCobertura);
-  const [cajasActivas, setCajasActivas] = useState(cachedCajasActivas || []);
-  const [cajasInactivas, setCajasInactivas] = useState(cachedCajasInactivas || []);
+  const [poligonoCobertura, setPoligonoCobertura] = useState(cachedCobertura?.poligono || null);
+  const [cajas, setCajas] = useState(cachedCobertura?.cajas || []);
+  const [infoCobertura, setInfoCobertura] = useState(cachedCobertura || null);
+  const [errorCobertura, setErrorCobertura] = useState(null);
+  const [cargandoCajas, setCargandoCajas] = useState(!cachedCobertura);
   const [coberturaVersion, setCoberturaVersion] = useState(0);
 
-  const [verActivas, setVerActivas] = useState(false);
+  const [verCertificadas, setVerCertificadas] = useState(false);
   const [verCobertura, setVerCobertura] = useState(true);
-  const [verInactivas, setVerInactivas] = useState(false);
+  const [verSinCertificar, setVerSinCertificar] = useState(false);
+  const [verNoImplantadas, setVerNoImplantadas] = useState(false);
   const [verMiUbicacion, setVerMiUbicacion] = useState(true); // 🆕
 
   const [googleCargado, setGoogleCargado] = useState(false);
@@ -89,9 +122,12 @@ const MapaCobertura = ({ usuarioActual }) => {
   const [centroMapa, setCentroMapa] = useState([18.4628, -97.3928]);
   const [limitesMapa, setLimitesMapa] = useState(null);
 
-  const [miUbicacion, setMiUbicacion] = useState(null); 
-  const [precisionGps, setPrecisionGps] = useState(null); 
+  const [miUbicacion, setMiUbicacion] = useState(null);
+  const [precisionGps, setPrecisionGps] = useState(null);
+  const [fuenteUbicacion, setFuenteUbicacion] = useState(null); // 'gps' | 'google'
   const watchIdRef = useRef(null);
+  const respaldoGoogleRef = useRef(null);
+  const gpsActivoRef = useRef(false);
 
   const [modalAbierto, setModalAbierto] = useState(false);
   const [ubicacionCaptura, setUbicacionCaptura] = useState(null); 
@@ -102,71 +138,119 @@ const MapaCobertura = ({ usuarioActual }) => {
   useEffect(() => {
     let montado = true;
 
-    const obtenerCajas = async () => {
-      if (cachedCajasActivas && cachedCajasInactivas && cachedPoligonoCobertura) {
+    // Las cajas y el polígono vienen del backend, que a su vez espeja la API de
+    // ispcore: el navegador no puede llamarla directo (no manda CORS) y el
+    // origen banea ráfagas, así que la petición sale de un solo lugar y con
+    // caché. El polígono también llega armado desde allá para no unir 1633
+    // buffers dentro del celular del canvaceador.
+    const cargarCobertura = async () => {
+      if (cachedCobertura) {
         if (montado) {
-          setCajasActivas(cachedCajasActivas);
-          setCajasInactivas(cachedCajasInactivas);
-          setPoligonoCobertura(cachedPoligonoCobertura);
+          setCajas(cachedCobertura.cajas || []);
+          setPoligonoCobertura(cachedCobertura.poligono || null);
+          setInfoCobertura(cachedCobertura);
           setCoberturaVersion(prev => prev + 1);
+          setCargandoCajas(false);
         }
         return;
       }
 
       try {
-        const response = await api.get('/cajas_distribucion/');
+        const datos = await obtenerCobertura();
+        cachedCobertura = datos;
         if (!montado) return;
 
-        const data = response.data;
-        const datosSeguros = data.filter(caja => caja.lat && caja.lng && !isNaN(parseFloat(caja.lat)));
-        const activas = datosSeguros.filter(caja => caja.certified === true && caja.implanted === true);
-        const inactivas = datosSeguros.filter(caja => caja.certified === false || caja.implanted === false);
-
-        setCajasActivas(activas);
-        setCajasInactivas(inactivas);
-
-        let areaUnificada = null;
-
-        if (activas.length > 0) {
-          const puntos = activas.map(caja => turf.point([parseFloat(caja.lng), parseFloat(caja.lat)]));
-          const buffers = turf.buffer(turf.featureCollection(puntos), 200, { units: 'meters' });
-          areaUnificada = turf.dissolve(buffers);
-
-          setPoligonoCobertura(areaUnificada);
-          setCoberturaVersion(prev => prev + 1);
-        } else {
-          setPoligonoCobertura(null);
-        }
-        cachedCajasActivas = activas;
-        cachedCajasInactivas = inactivas;
-        cachedPoligonoCobertura = areaUnificada;
-
+        setCajas(datos.cajas || []);
+        setPoligonoCobertura(datos.poligono || null);
+        setInfoCobertura(datos);
+        setErrorCobertura(null);
+        setCoberturaVersion(prev => prev + 1);
       } catch (error) {
-        console.error('Error al obtener cajas de la API:', error);
+        console.error('Error al obtener las cajas de cobertura:', error);
+        if (montado) {
+          setErrorCobertura(
+            error?.response?.data?.error || 'No se pudieron cargar las cajas de cobertura.'
+          );
+        }
+      } finally {
+        if (montado) setCargandoCajas(false);
       }
     };
 
-    obtenerCajas();
+    cargarCobertura();
     return () => { montado = false; };
   }, []);
 
-  useEffect(() => {
-    if (!('geolocation' in navigator)) return;
+  // El corte es el de la base de datos, no el del estado operativo: verde solo
+  // para implantadas y certificadas, que son las mismas que arman el polígono
+  // de cobertura en el backend.
+  const gruposCajas = useMemo(() => {
+    const grupos = { certificadas: [], sinCertificar: [], noImplantadas: [] };
+    cajas.forEach(caja => {
+      if (!caja.implanted) grupos.noImplantadas.push(caja);
+      else if (caja.certified) grupos.certificadas.push(caja);
+      else grupos.sinCertificar.push(caja);
+    });
+    return grupos;
+  }, [cajas]);
 
-    watchIdRef.current = navigator.geolocation.watchPosition(
-      (pos) => {
-        const { latitude, longitude, accuracy } = pos.coords;
-        setMiUbicacion([latitude, longitude]);
-        setPrecisionGps(accuracy);
-      },
-      (error) => {
-        console.warn('No se pudo obtener la ubicación del canvaceador:', error?.message);
-      },
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
-    );
+  useEffect(() => {
+    let montado = true;
+
+    // Respaldo con la Geolocation API de Google: entra cuando el GPS del
+    // navegador no puede usarse (contexto http, permiso negado, sin GPS) y se
+    // refresca cada minuto mientras el GPS siga sin responder. En cuanto el
+    // GPS da una lectura, el respaldo se apaga y ya no vuelve a pisarla.
+    const consultarRespaldoGoogle = async () => {
+      if (gpsActivoRef.current) return;
+      const { punto, error } = await obtenerUbicacionGoogle();
+      if (!montado || gpsActivoRef.current) return;
+      if (punto) {
+        setMiUbicacion([punto.lat, punto.lng]);
+        setPrecisionGps(punto.precision);
+        setFuenteUbicacion('google');
+      } else {
+        console.warn('Geolocation API sin ubicación:', error);
+      }
+    };
+
+    const iniciarRespaldoGoogle = () => {
+      if (respaldoGoogleRef.current != null || gpsActivoRef.current) return;
+      consultarRespaldoGoogle();
+      respaldoGoogleRef.current = setInterval(consultarRespaldoGoogle, 60000);
+    };
+
+    const detenerRespaldoGoogle = () => {
+      if (respaldoGoogleRef.current != null) {
+        clearInterval(respaldoGoogleRef.current);
+        respaldoGoogleRef.current = null;
+      }
+    };
+
+    if (motivoGpsNoDisponible()) {
+      iniciarRespaldoGoogle();
+    } else {
+      watchIdRef.current = navigator.geolocation.watchPosition(
+        (pos) => {
+          const { latitude, longitude, accuracy } = pos.coords;
+          gpsActivoRef.current = true;
+          detenerRespaldoGoogle();
+          setMiUbicacion([latitude, longitude]);
+          setPrecisionGps(accuracy);
+          setFuenteUbicacion('gps');
+        },
+        (error) => {
+          console.warn('GPS del navegador no disponible, usando Geolocation API:', error?.message);
+          iniciarRespaldoGoogle();
+        },
+        { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
+      );
+    }
 
     return () => {
+      montado = false;
       if (watchIdRef.current != null) navigator.geolocation.clearWatch(watchIdRef.current);
+      detenerRespaldoGoogle();
     };
   }, []);
 
@@ -187,11 +271,13 @@ const MapaCobertura = ({ usuarioActual }) => {
     return evaluarCobertura(miUbicacion[0], miUbicacion[1]);
   }, [miUbicacion, evaluarCobertura]);
 
+  const ubicacionAproximada = fuenteUbicacion === 'google' || (precisionGps != null && precisionGps > 500);
+
   const abrirModalProspecto = () => {
-    if (miUbicacion) {
+    if (miUbicacion && !ubicacionAproximada) {
       setUbicacionCaptura({ lat: miUbicacion[0], lng: miUbicacion[1] });
     } else {
-      setUbicacionCaptura(null); 
+      setUbicacionCaptura(null);
     }
     setModalAbierto(true);
   };
@@ -314,35 +400,32 @@ const MapaCobertura = ({ usuarioActual }) => {
     }
   };
 
-  const renderCajasActivas = useMemo(() => {
-    if (!verActivas) return null;
-    return cajasActivas.map((caja, idx) => (
-      <CircleMarker
-        key={`act-${idx}`}
-        center={[parseFloat(caja.lat), parseFloat(caja.lng)]}
-        radius={5}
-        pathOptions={{ color: '#16a34a', fillColor: '#22c55e', fillOpacity: 1, weight: 2 }}
-        eventHandlers={{
-          click: (e) => e.target.bindPopup(`<b>${caja.name}</b><br/>✅ Caja Activa`).openPopup()
-        }}
-      />
-    ));
-  }, [verActivas, cajasActivas]);
+  const dibujarCajas = (lista, colores, prefijo) => lista.map((caja) => (
+    <CircleMarker
+      key={`${prefijo}-${caja.id}`}
+      center={[caja.lat, caja.lng]}
+      radius={5}
+      pathOptions={{ ...colores, fillOpacity: 1, weight: 2 }}
+      eventHandlers={{
+        click: (e) => e.target.bindPopup(popupDeCaja(caja)).openPopup()
+      }}
+    />
+  ));
 
-  const renderCajasInactivas = useMemo(() => {
-    if (!verInactivas) return null;
-    return cajasInactivas.map((caja, idx) => (
-      <CircleMarker
-        key={`inact-${idx}`}
-        center={[parseFloat(caja.lat), parseFloat(caja.lng)]}
-        radius={5}
-        pathOptions={{ color: '#dc2626', fillColor: '#ef4444', fillOpacity: 1, weight: 2 }}
-        eventHandlers={{
-          click: (e) => e.target.bindPopup(`<b>${caja.name}</b><br/>❌ Caja Pendiente`).openPopup()
-        }}
-      />
-    ));
-  }, [verInactivas, cajasInactivas]);
+  const renderCajasCertificadas = useMemo(
+    () => (verCertificadas ? dibujarCajas(gruposCajas.certificadas, COLOR_CERTIFICADA, 'cert') : null),
+    [verCertificadas, gruposCajas]
+  );
+
+  const renderCajasSinCertificar = useMemo(
+    () => (verSinCertificar ? dibujarCajas(gruposCajas.sinCertificar, COLOR_SIN_CERTIFICAR, 'sincert') : null),
+    [verSinCertificar, gruposCajas]
+  );
+
+  const renderCajasNoImplantadas = useMemo(
+    () => (verNoImplantadas ? dibujarCajas(gruposCajas.noImplantadas, COLOR_NO_IMPLANTADA, 'noimp') : null),
+    [verNoImplantadas, gruposCajas]
+  );
 
   const renderRegistrosSesion = useMemo(() => {
     if (!verRegistros) return null;
@@ -371,6 +454,20 @@ const MapaCobertura = ({ usuarioActual }) => {
     : dentroDeCobertura ? 'Registrar Posible Cliente'
     : 'Registrar Prospecto';
 
+  const textoActualizado = useMemo(() => {
+    if (!infoCobertura?.actualizado_en) return '';
+    const fecha = new Date(infoCobertura.actualizado_en);
+    if (isNaN(fecha)) return '';
+    return fecha.toLocaleString('es-MX', {
+      day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
+    });
+  }, [infoCobertura]);
+
+  const sufijoAprox = miUbicacion && ubicacionAproximada ? ' (aprox.)' : '';
+  const textoPrecision = precisionGps == null ? ''
+    : precisionGps >= 1000 ? `±${(precisionGps / 1000).toFixed(1)} km`
+    : `±${Math.round(precisionGps)} m`;
+
   return (
     <Box sx={{ width: '100%' }}>
       <style>{estilosPulsoCanvaceador}</style>
@@ -382,14 +479,41 @@ const MapaCobertura = ({ usuarioActual }) => {
         <Typography variant="body2" color="text.secondary">
           Visualiza zonas con factibilidad en Tehuacán en tiempo real.
         </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5, flexWrap: 'wrap' }}>
+          {cargandoCajas && (
+            <>
+              <CircularProgress size={14} />
+              <Typography variant="caption" color="text.secondary">Cargando cajas…</Typography>
+            </>
+          )}
+          {!cargandoCajas && errorCobertura && (
+            <Typography variant="caption" sx={{ color: '#b91c1c', fontWeight: 600 }}>
+              {errorCobertura}
+            </Typography>
+          )}
+          {!cargandoCajas && !errorCobertura && infoCobertura && (
+            <Typography variant="caption" color="text.secondary">
+              {infoCobertura.total} cajas · actualizadas el {textoActualizado}
+            </Typography>
+          )}
+          {infoCobertura?.origen === 'respaldo' && (
+            <Chip
+              size="small"
+              label="Datos de respaldo: ispcore no respondió"
+              color="warning"
+              sx={{ fontWeight: 600, height: 20 }}
+            />
+          )}
+        </Box>
       </Box>
 
       <Paper variant="outlined" sx={{ p: '8px 16px', mb: 2, borderRadius: 2, display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, alignItems: { xs: 'flex-start', sm: 'center' }, gap: { xs: 1, sm: 3 }, backgroundColor: '#f8fafc' }}>
         <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#475569' }}>Capas Visibles:</Typography>
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: { xs: 0.5, sm: 2 } }}>
           <FormControlLabel control={<Checkbox size="small" checked={verCobertura} onChange={(e) => setVerCobertura(e.target.checked)} />} label={<Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><Box sx={{ width: 14, height: 14, borderRadius: 0.5, bgcolor: '#3b82f6', opacity: 0.6, flexShrink: 0 }} /><Typography variant="body2" sx={{ fontWeight: 600, color: '#334155' }}>Zona con Cobertura</Typography></Box>} />
-          <FormControlLabel control={<Checkbox size="small" color="success" checked={verActivas} onChange={(e) => setVerActivas(e.target.checked)} />} label={<Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: '#22c55e', border: '2px solid #16a34a', flexShrink: 0 }} /><Typography variant="body2" sx={{ fontWeight: 600, color: '#334155' }}>Cajas Activas (Verdes)</Typography></Box>} />
-          <FormControlLabel control={<Checkbox size="small" color="error" checked={verInactivas} onChange={(e) => setVerInactivas(e.target.checked)} />} label={<Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: '#ef4444', border: '2px solid #dc2626', flexShrink: 0 }} /><Typography variant="body2" sx={{ fontWeight: 600, color: '#334155' }}>Cajas Inactivas (Rojas)</Typography></Box>} />
+          <FormControlLabel control={<Checkbox size="small" color="success" checked={verCertificadas} onChange={(e) => setVerCertificadas(e.target.checked)} />} label={<Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: '#22c55e', border: '2px solid #16a34a', flexShrink: 0 }} /><Typography variant="body2" sx={{ fontWeight: 600, color: '#334155' }}>Implantadas y certificadas ({gruposCajas.certificadas.length})</Typography></Box>} />
+          <FormControlLabel control={<Checkbox size="small" color="warning" checked={verSinCertificar} onChange={(e) => setVerSinCertificar(e.target.checked)} />} label={<Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: '#f59e0b', border: '2px solid #d97706', flexShrink: 0 }} /><Typography variant="body2" sx={{ fontWeight: 600, color: '#334155' }}>Implantadas sin certificar ({gruposCajas.sinCertificar.length})</Typography></Box>} />
+          <FormControlLabel control={<Checkbox size="small" checked={verNoImplantadas} onChange={(e) => setVerNoImplantadas(e.target.checked)} />} label={<Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: '#94a3b8', border: '2px solid #64748b', flexShrink: 0 }} /><Typography variant="body2" sx={{ fontWeight: 600, color: '#334155' }}>No implantadas ({gruposCajas.noImplantadas.length})</Typography></Box>} />
           <FormControlLabel control={<Checkbox size="small" checked={verMiUbicacion} onChange={(e) => setVerMiUbicacion(e.target.checked)} />} label={<Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: '#2563eb', border: '2px solid #fff', boxShadow: '0 0 0 1px #2563eb', flexShrink: 0 }} /><Typography variant="body2" sx={{ fontWeight: 600, color: '#334155' }}>Mi Ubicación</Typography></Box>} />
           {registrosSesion.length > 0 && (
             <FormControlLabel control={<Checkbox size="small" checked={verRegistros} onChange={(e) => setVerRegistros(e.target.checked)} />} label={<Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: '#15803d', border: '2px solid #fff', boxShadow: '0 0 0 1px #15803d', flexShrink: 0 }} /><Typography variant="body2" sx={{ fontWeight: 600, color: '#334155' }}>Mis Registros ({registrosSesion.length})</Typography></Box>} />
@@ -460,22 +584,33 @@ const MapaCobertura = ({ usuarioActual }) => {
         </Box>
 
         <Box sx={{ position: 'absolute', top: 90, left: 12, zIndex: 999 }}>
-          <Chip
-            size="small"
-            icon={<PersonPinCircle sx={{ fontSize: 18 }} />}
-            label={
-              !miUbicacion ? 'Ubicando GPS...'
-              : dentroDeCobertura === null ? 'Cobertura no disponible'
-              : dentroDeCobertura ? 'Dentro de cobertura'
-              : 'Fuera de cobertura'
+          <Tooltip
+            title={
+              !miUbicacion || !ubicacionAproximada ? ''
+              : fuenteUbicacion === 'google'
+                ? `Ubicación aproximada por red (Geolocation API de Google)${textoPrecision ? `, precisión ${textoPrecision}` : ''}. El GPS del navegador no está disponible.`
+                : `El navegador solo logró una estimación por red${textoPrecision ? ` (precisión ${textoPrecision})` : ''}, típico en equipos sin GPS. En el celular, con permiso de ubicación, la posición será exacta.`
             }
-            color={
-              !miUbicacion || dentroDeCobertura === null ? 'default'
-              : dentroDeCobertura ? 'success'
-              : 'warning'
-            }
-            sx={{ fontWeight: 700, backgroundColor: '#000000', boxShadow: 2 }}
-          />
+          >
+            <Chip
+              size="small"
+              icon={<PersonPinCircle sx={{ fontSize: 18 }} />}
+              label={
+                !miUbicacion ? 'Ubicando...'
+                : `${
+                    dentroDeCobertura === null ? 'Cobertura no disponible'
+                    : dentroDeCobertura ? 'Dentro de cobertura'
+                    : 'Fuera de cobertura'
+                  }${sufijoAprox}${textoPrecision ? ` · ${textoPrecision}` : ''}`
+              }
+              color={
+                !miUbicacion || dentroDeCobertura === null ? 'default'
+                : dentroDeCobertura ? 'success'
+                : 'warning'
+              }
+              sx={{ fontWeight: 700, backgroundColor: '#000000', boxShadow: 2 }}
+            />
+          </Tooltip>
         </Box>
 
         <Tooltip title="Centrar en mi ubicación">
@@ -506,13 +641,15 @@ const MapaCobertura = ({ usuarioActual }) => {
             <MapController center={centroMapa} bounds={limitesMapa} />
             <FixMapSize />
             {verCobertura && poligonoCobertura && (<GeoJSON key={`cobertura-v-${coberturaVersion}`} data={poligonoCobertura} style={{ color: '#3b82f6', weight: 2, fillColor: '#3b82f6', fillOpacity: 0.25 }} />)}
-            {renderCajasActivas}
-            {renderCajasInactivas}
+            {renderCajasCertificadas}
+            {renderCajasSinCertificar}
+            {renderCajasNoImplantadas}
             {renderRegistrosSesion}
 
             {verMiUbicacion && miUbicacion && (
               <>
-                {precisionGps && precisionGps < 500 && (
+                {/* Con error de decenas de km el círculo tapa el mapa entero; el chip ya avisa la precisión */}
+                {precisionGps && precisionGps < 15000 && (
                   <Circle
                     center={miUbicacion}
                     radius={precisionGps}
@@ -526,11 +663,11 @@ const MapaCobertura = ({ usuarioActual }) => {
                   eventHandlers={{
                     click: (e) => e.target
                       .bindPopup(
-                        `<b>📍 Tú estás aquí</b><br/>${
+                        `<b>📍 Tú estás aquí</b>${ubicacionAproximada ? ` <small>(aprox. por red${textoPrecision ? `, ${textoPrecision}` : ''})</small>` : ''}<br/>${
                           dentroDeCobertura === null ? 'Zona sin evaluar'
                           : dentroDeCobertura ? '🟢 Dentro de cobertura'
                           : '🟠 Fuera de cobertura'
-                        }`
+                        }${ubicacionAproximada ? '<br/><small>Para afinar: permite la ubicación <b>precisa</b> en el navegador y activa el GPS del teléfono.</small>' : ''}`
                       )
                       .openPopup()
                   }}

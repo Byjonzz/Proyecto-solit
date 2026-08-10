@@ -238,7 +238,10 @@ const AgendaInstalaciones = () => {
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
-      hour12: true
+      hour12: true,
+      // La operación es en México: fija la zona para que la hora no dependa
+      // del reloj de la computadora desde donde se consulte.
+      timeZone: 'America/Mexico_City'
     });
   };
 
@@ -305,6 +308,7 @@ const AgendaInstalaciones = () => {
       fecha_completada: instalacionDB?.fecha_completada || null,
       
       fecha_creacion_contrato: contrato.fecha_creacion || contrato.created_at || contrato.fecha_registro || null,
+      creado_por_nombre: contrato.creado_por_nombre || null,
       
       telefono: contrato.telefono1,
       correo: contrato.correo,
@@ -806,13 +810,20 @@ const AgendaInstalaciones = () => {
                   
                   <TableCell>
                     {filtroEstatus === 'pendientes' ? (
-                      orden.fecha_creacion_contrato ? (
-                        <Typography variant="body2" sx={{ fontWeight: 600, color: '#475569' }}>
-                          {formatFechaHora(orden.fecha_creacion_contrato)}
-                        </Typography>
-                      ) : (
-                        <Typography variant="caption" color="text.secondary">Sin fecha de venta</Typography>
-                      )
+                      <>
+                        {orden.fecha_creacion_contrato ? (
+                          <Typography variant="body2" sx={{ fontWeight: 600, color: '#475569' }}>
+                            {formatFechaHora(orden.fecha_creacion_contrato)}
+                          </Typography>
+                        ) : (
+                          <Typography variant="caption" color="text.secondary">Sin fecha de venta</Typography>
+                        )}
+                        {orden.creado_por_nombre && (
+                          <Typography variant="caption" sx={{ display: 'block', color: '#64748b' }}>
+                            Capturó: {orden.creado_por_nombre}
+                          </Typography>
+                        )}
+                      </>
                     ) : (
                       orden.fecha_programada ? (
                         <Typography variant="body2" sx={{ fontWeight: 600, color: '#1d4ed8' }}>
@@ -1374,7 +1385,13 @@ const AgendaInstalaciones = () => {
                 <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
                   <Receipt color="warning" /> Recibo de Luz
                 </Typography>
-                {renderImagenClickeable(ordenSeleccionada?.foto_recibo_luz, 'Recibo de Luz')}
+                {ordenSeleccionada?.foto_recibo_luz
+                  ? renderImagenClickeable(ordenSeleccionada?.foto_recibo_luz, 'Recibo de Luz')
+                  : (
+                    <Typography variant="body2" color="text.secondary">
+                      Sin comprobante — el técnico lo captura en la instalación
+                    </Typography>
+                  )}
               </Box>
             </Grid>
 

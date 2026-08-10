@@ -47,6 +47,7 @@ import {
   Map as MapIcon
 } from '@mui/icons-material';
 import api from '../../services/api';
+import BotonEvidencia from '../Forms/BotonEvidencia';
 import MapaRutaInstalacion from './MapaRutaInstalacion';
 import BannerNavegacion from './BannerNavegacion';
 import { aPuntoNumerico, obtenerPosicionActual, motivoGpsNoDisponible } from '../../utils/geo';
@@ -107,7 +108,8 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
     potencia_dbm: '',
     tipo_instalacion: 'Residencial',
     conectores_utilizados: 2,
-    notas_instalacion: ''
+    notas_instalacion: '',
+    foto_comprobante: null
   });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -336,7 +338,8 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
       potencia_dbm: '',
       tipo_instalacion: 'Residencial',
       conectores_utilizados: 2,
-      notas_instalacion: instalacion.observaciones_tecnico || ''
+      notas_instalacion: instalacion.observaciones_tecnico || '',
+      foto_comprobante: null
     });
     setDialogOpen(true);
   };
@@ -550,9 +553,19 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
         return;
       }
 
-      await api.patch(`/contratos/${instalacionSeleccionada.contrato_id}/`, {
-        estatus: 'Completado'
-      });
+      // Ventas puede levantar el contrato sin comprobante de domicilio, con el
+      // compromiso de que el técnico lo capture aquí antes de cerrar.
+      const contratoSinComprobante = !instalacionSeleccionada.contrato?.foto_recibo_luz;
+      if (contratoSinComprobante && !formData.foto_comprobante) {
+        setError('Falta el comprobante de domicilio: ventas no lo capturó, tómale foto antes de completar');
+        return;
+      }
+
+      const cambiosContrato = { estatus: 'Completado' };
+      if (formData.foto_comprobante) {
+        cambiosContrato.foto_recibo_luz = formData.foto_comprobante;
+      }
+      await api.patch(`/contratos/${instalacionSeleccionada.contrato_id}/`, cambiosContrato);
 
       let duracion = null;
       if (instalacionSeleccionada.instalacion_id) {
@@ -1141,6 +1154,29 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
                         required
                       />
                     </Box>
+
+                    {/* Ventas puede levantar el contrato sin comprobante de
+                        domicilio; en ese caso el técnico lo captura aquí y es
+                        obligatorio para poder completar. */}
+                    {!instalacionSeleccionada.contrato?.foto_recibo_luz && (
+                      <Box sx={{ p: 1.5, bgcolor: '#fffbeb', border: '1px solid #fde68a', borderRadius: 2 }}>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
+                          Comprobante de domicilio *
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                          Ventas no lo capturó: pídeselo al cliente y tómale foto (o sube el PDF).
+                        </Typography>
+                        <BotonEvidencia
+                          etiqueta={formData.foto_comprobante ? 'Comprobante Cargado' : 'Subir Comprobante'}
+                          cargada={Boolean(formData.foto_comprobante)}
+                          permitirPdf
+                          color="warning"
+                          fullWidth
+                          onArchivo={(dataUri) => { setFormData(prev => ({ ...prev, foto_comprobante: dataUri })); setError(''); }}
+                          onError={(mensaje) => setError(mensaje)}
+                        />
+                      </Box>
+                    )}
 
                     <TextField
                       multiline

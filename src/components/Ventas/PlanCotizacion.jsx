@@ -5,7 +5,7 @@ import { useContratos } from '../../hooks/useContratos';
 import { usePlanes } from '../../hooks/usePlanes';
 import api from '../../services/api';
 import {
-  validarNombrePersona, validarTelefonoMx, validarCorreo,
+  validarNombrePersona, validarTelefonoMx,
   validarINE, validarDireccion, validarTextoLibre
 } from '../../utils/validaciones';
 import { esPdf } from '../../utils/evidencias';
@@ -120,6 +120,10 @@ const PlanCotizacion = ({
 
   const canvasRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
+  // La firma vive en el bitmap del canvas y el canvas se desmonta al cambiar
+  // de paso; se conserva aquí como imagen para restaurarla si el vendedor
+  // regresa, en vez de obligar al cliente a firmar otra vez.
+  const [firmaGuardada, setFirmaGuardada] = useState(null);
 
   const datosPrefill = datosDesdeProspecto || location.state?.datosDesdeProspecto || null;
   const [planInteresPendiente, setPlanInteresPendiente] = useState(null);
@@ -218,14 +222,38 @@ const PlanCotizacion = ({
     ctx.stroke();
   };
 
-  const stopDrawing = () => setIsDrawing(false);
+  const stopDrawing = () => {
+    if (!isDrawing) return;
+    setIsDrawing(false);
+    // Cada vez que levanta el lápiz se respalda el trazo acumulado.
+    const canvas = canvasRef.current;
+    if (canvas) setFirmaGuardada(canvas.toDataURL());
+  };
 
   const limpiarFirma = () => {
+    setFirmaGuardada(null);
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
   };
+
+  // Al volver al paso de evidencias el canvas se monta en blanco: se restaura
+  // el último trazo respaldado.
+  useEffect(() => {
+    if (activeStep !== 2 || !firmaGuardada) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const img = new Image();
+    img.onload = () => {
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+    };
+    img.src = firmaGuardada;
+    // Solo al entrar al paso: redibujar en cada trazo pisaría la firma en curso.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeStep]);
 
   /**
    * Traduce las coordenadas a una dirección.
@@ -314,12 +342,13 @@ const PlanCotizacion = ({
       const e2 = validarNombrePersona(formData.nombre);
       const e3 = validarTelefonoMx(formData.telefono1);
       const e4 = validarTelefonoMx(formData.telefono2, { obligatorio: false });
-      const e5 = validarCorreo(formData.correo);
       if (e1) errores.ine = e1;
       if (e2) errores.nombre = e2;
       if (e3) errores.telefono1 = e3;
       if (e4) errores.telefono2 = e4;
-      if (e5) errores.correo = e5;
+      // El correo es obligatorio pero sin validar su formato: hay clientes
+      // con correos poco comunes que el filtro anterior marcaba como falsos.
+      if (!formData.correo.trim()) errores.correo = 'El correo es obligatorio';
 
       // Dos teléfonos iguales suele ser copiar y pegar por salir del paso.
       if (!e3 && !e4 && formData.telefono2 && formData.telefono1 === formData.telefono2) {
@@ -348,9 +377,10 @@ const PlanCotizacion = ({
     }
 
     if (paso === 2) {
+      // El comprobante de domicilio no es obligatorio aquí: si el cliente no
+      // lo tiene a la mano, el técnico lo captura durante la instalación.
       if (!fotoFrenteINE) errores.evidencias = 'Falta la foto del frente del INE';
       else if (!fotoReversoINE) errores.evidencias = 'Falta la foto del reverso del INE';
-      else if (!fotoReciboLuz) errores.evidencias = 'Falta la foto del recibo de luz';
       else if (!fotoFachada) errores.evidencias = 'Falta la foto de la fachada';
 
       if (!errores.evidencias && firmaEstaVacia()) {
@@ -367,13 +397,16 @@ const PlanCotizacion = ({
     return mensajes.length === 0;
   };
 
-  /** True si el canvas de la firma sigue en blanco. */
+  /** True si no hay firma ni en el canvas ni en el respaldo. */
   const firmaEstaVacia = () => {
     const canvas = canvasRef.current;
-    if (!canvas) return true;
+    if (!canvas) return !firmaGuardada;
     const ctx = canvas.getContext('2d');
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    return !imageData.data.some(channel => channel !== 0);
+    const canvasVacio = !imageData.data.some(channel => channel !== 0);
+    // El canvas puede estar recién montado y todavía sin restaurar; el
+    // respaldo también cuenta como firma válida.
+    return canvasVacio && !firmaGuardada;
   };
 
   const handleNext = () => {
@@ -462,7 +495,16 @@ const PlanCotizacion = ({
     setGuardado(true);
 
     try {
-      const firmaDigital = canvas.toDataURL('image/jpeg', 0.5);
+      // El canvas es la fuente primaria; si por un cambio de paso aún no se
+      // restaura el trazo, se usa el respaldo.
+      let firmaDigital = firmaGuardada;
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        const tieneTrazo = ctx
+          .getImageData(0, 0, canvas.width, canvas.height)
+          .data.some(channel => channel !== 0);
+        if (tieneTrazo) firmaDigital = canvas.toDataURL('image/jpeg', 0.5);
+      }
 
       let calleNumeroFinal = '';
       if (metodoUbicacion === 'manual') {
@@ -896,7 +938,7 @@ const PlanCotizacion = ({
                   que el cliente descarga de CFE), así que este botón pregunta si
                   se toma foto o se sube el archivo. Va al mismo campo. */}
               <BotonEvidencia
-                etiqueta={fotoReciboLuz ? 'Comprobante Cargado' : 'Comprobante de Domicilio'}
+                etiqueta={fotoReciboLuz ? 'Comprobante Cargado' : 'Comprobante de Domicilio (opcional)'}
                 cargada={Boolean(fotoReciboLuz)}
                 permitirPdf
                 icono={<Receipt />}
@@ -920,6 +962,7 @@ const PlanCotizacion = ({
 
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 3 }}>
               En el comprobante de domicilio puedes tomar la foto o subir el PDF digital.
+              Si el cliente no lo tiene a la mano, el técnico lo captura el día de la instalación.
             </Typography>
 
             {(fotoFrenteINE || fotoReversoINE || fotoReciboLuz || fotoFachada) && (
@@ -1146,7 +1189,10 @@ const PlanCotizacion = ({
                 secondaryTypographyProps={{ fontWeight: 700, color: '#0f172a' }} />
             </ListItem>
             <ListItem disableGutters>
-              <ListItemText primary="Evidencias" secondary="INE frente y reverso, recibo de luz, fachada y firma" />
+              <ListItemText primary="Evidencias"
+                secondary={fotoReciboLuz
+                  ? 'INE frente y reverso, comprobante de domicilio, fachada y firma'
+                  : 'INE frente y reverso, fachada y firma — el comprobante de domicilio lo captura el técnico en la instalación'} />
               <CheckCircle sx={{ color: '#16a34a' }} />
             </ListItem>
           </List>

@@ -54,6 +54,47 @@ export const motivoGpsNoDisponible = () => {
 };
 
 /**
+ * Ubicación estimada con la Geolocation API de Google (señales de red / IP).
+ *
+ * Es el respaldo para cuando el GPS del navegador no puede usarse (contexto
+ * http, permiso negado, equipo sin GPS): no requiere permiso del usuario ni
+ * contexto seguro, a cambio de menor precisión. El radio real de error viene
+ * en `precision` (metros), igual que en obtenerPosicionActual.
+ *
+ * Ojo: la clave debe permitir la Geolocation API; las claves restringidas por
+ * "referentes HTTP" son rechazadas por esta API (el error llega en `error`).
+ */
+export const obtenerUbicacionGoogle = async () => {
+  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  if (!apiKey) {
+    return { punto: null, error: 'Falta VITE_GOOGLE_MAPS_API_KEY en el .env para usar la Geolocation API.' };
+  }
+
+  try {
+    const respuesta = await fetch(
+      `https://www.googleapis.com/geolocation/v1/geolocate?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ considerIp: true })
+      }
+    );
+    const data = await respuesta.json().catch(() => null);
+
+    if (!respuesta.ok || !data?.location) {
+      return { punto: null, error: data?.error?.message || 'La Geolocation API no devolvió ubicación.' };
+    }
+
+    return {
+      punto: { lat: data.location.lat, lng: data.location.lng, precision: data.accuracy ?? null },
+      error: null
+    };
+  } catch (e) {
+    return { punto: null, error: e?.message || 'No se pudo consultar la Geolocation API.' };
+  }
+};
+
+/**
  * Una sola lectura del GPS, como promesa. Resuelve `{punto, error}` en vez de
  * rechazar, para que quien la use no tenga que envolverla en try/catch.
  */
