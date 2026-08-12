@@ -104,36 +104,36 @@ const TablaPlanesCanvaceo = ({ planes, seleccionadoId, onSelect, titulo, colorPr
   );
 };
 
-const SeleccionPlanesCanvaceo = ({ planSeleccionado, onPlanSeleccionado, planesFibraSimetrica, planesFibraAsimetrica, planesSolitTV, planesHibridos, planesAntenaWireless }) => {
-  const [categoria, setCategoria] = useState('simetrica');
+const SeleccionPlanesCanvaceo = ({ planSeleccionado, onPlanSeleccionado, categorias = [] }) => {
+  // Se identifica por nombre y no por una clave fija ('simetrica', 'hibrido'):
+  // las categorías se renombran desde administración y una clave escrita a mano
+  // dejaría de corresponder con nada.
+  const [categoria, setCategoria] = useState('');
   const handleSeleccionar = (plan) => { onPlanSeleccionado(plan); };
 
-  const categoriasDisponibles = [];
-
-  if (planesFibraSimetrica.length > 0) categoriasDisponibles.push({ value: 'simetrica', label: 'Fibra Simétrica', planes: planesFibraSimetrica, esTabla: false });
-  if (planesFibraAsimetrica.length > 0) categoriasDisponibles.push({ value: 'asimetrica', label: 'Fibra Asimétrica', planes: planesFibraAsimetrica, esTabla: false });
-  if (planesSolitTV.length > 0) categoriasDisponibles.push({ value: 'solittv', label: 'Solit + TV', planes: planesSolitTV, esTabla: false });
-  if (planesHibridos.length > 0) categoriasDisponibles.push({ value: 'hibrido', label: 'Híbrido', planes: planesHibridos, esTabla: true, color: '#26a69a' });
-  if (planesAntenaWireless.length > 0) categoriasDisponibles.push({ value: 'wireless', label: 'Wireless', planes: planesAntenaWireless, esTabla: true, color: '#7c4dff' });
+  const nombres = categorias.map(c => c.nombre).join('|');
 
   React.useEffect(() => {
-    if (categoriasDisponibles.length > 0 && !categoriasDisponibles.find(c => c.value === categoria)) {
-      setCategoria(categoriasDisponibles[0].value);
+    if (categorias.length > 0 && !categorias.find(c => c.nombre === categoria)) {
+      setCategoria(categorias[0].nombre);
     }
-  }, [categoriasDisponibles]);
+    // Se compara la lista de nombres y no el arreglo: usePlanes devuelve uno
+    // nuevo en cada refresco y el efecto se repetiría sin que nada cambie.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nombres, categoria]);
 
-  if (categoriasDisponibles.length === 0) {
+  if (categorias.length === 0) {
     return <Alert severity="info" sx={{ my: 2 }}>No hay planes disponibles en la memoria. Necesitas conexión para descargarlos la primera vez.</Alert>;
   }
 
-  const categoriaActual = categoriasDisponibles.find(c => c.value === categoria);
+  const categoriaActual = categorias.find(c => c.nombre === categoria) || categorias[0];
 
   return (
     <Box sx={{ width: '100%' }}>
       <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 2, color: '#1e293b' }}>Selecciona el Paquete de Interés</Typography>
-      <RadioGroup row value={categoria} onChange={(e) => setCategoria(e.target.value)} sx={{ mb: 2, '& .MuiFormControlLabel-label': { fontSize: '0.85rem', fontWeight: 600 } }}>
-        {categoriasDisponibles.map((cat) => (
-          <FormControlLabel key={cat.value} value={cat.value} control={<Radio size="small" />} label={cat.label} />
+      <RadioGroup row value={categoriaActual?.nombre || ''} onChange={(e) => setCategoria(e.target.value)} sx={{ mb: 2, '& .MuiFormControlLabel-label': { fontSize: '0.85rem', fontWeight: 600 } }}>
+        {categorias.map((cat) => (
+          <FormControlLabel key={cat.nombre} value={cat.nombre} control={<Radio size="small" />} label={cat.nombre} />
         ))}
       </RadioGroup>
 
@@ -141,7 +141,7 @@ const SeleccionPlanesCanvaceo = ({ planSeleccionado, onPlanSeleccionado, planesF
         <Box>
           {categoriaActual.esTabla ? (
             <Box sx={{ maxWidth: 500 }}>
-              <TablaPlanesCanvaceo planes={categoriaActual.planes} seleccionadoId={planSeleccionado?.id} onSelect={handleSeleccionar} titulo={categoriaActual.label.toUpperCase()} colorPrincipal={categoriaActual.color} />
+              <TablaPlanesCanvaceo planes={categoriaActual.planes} seleccionadoId={planSeleccionado?.id} onSelect={handleSeleccionar} titulo={categoriaActual.nombre.toUpperCase()} colorPrincipal={categoriaActual.color} />
             </Box>
           ) : (
             <Grid container spacing={2}>
@@ -210,15 +210,10 @@ const NuevoProspect = ({
   });
 
   const { createProspecto } = useProspectos();
-  const {
-    planesFibraSimetrica, planesFibraAsimetrica, planesSolitTV,
-    planesHibridos, planesAntenaWireless, loading: loadingPlanesOriginal
-  } = usePlanes();
+  const { categorias, loading: loadingPlanesOriginal } = usePlanes();
 
   // CACHÉ LOCAL DE PLANES
-  const [planesCache, setPlanesCache] = useState({
-    simetrica: [], asimetrica: [], tv: [], hibridos: [], wireless: []
-  });
+  const [categoriasCache, setCategoriasCache] = useState([]);
   const [cargandoPlanes, setCargandoPlanes] = useState(true);
 
   const [formData, setFormData] = useState({
@@ -236,27 +231,21 @@ const NuevoProspect = ({
         : 'Nuevo';
 
   useEffect(() => {
-    const cacheLocal = JSON.parse(localStorage.getItem('planes_canvaceo_offline'));
-    const hayPlanesNuevos = planesFibraSimetrica.length > 0 || planesFibraAsimetrica.length > 0 || planesSolitTV.length > 0 || planesHibridos.length > 0 || planesAntenaWireless.length > 0;
+    // Clave nueva a propósito: la caché vieja guardaba cinco listas fijas y
+    // ahora es un arreglo de categorías. Leer el formato anterior reventaría.
+    const guardadas = JSON.parse(localStorage.getItem('categorias_canvaceo_offline') || 'null');
 
-    if (hayPlanesNuevos) {
-      const objPlanes = {
-        simetrica: planesFibraSimetrica,
-        asimetrica: planesFibraAsimetrica,
-        tv: planesSolitTV,
-        hibridos: planesHibridos,
-        wireless: planesAntenaWireless
-      };
-      localStorage.setItem('planes_canvaceo_offline', JSON.stringify(objPlanes));
-      setPlanesCache(objPlanes);
+    if (categorias.length > 0) {
+      localStorage.setItem('categorias_canvaceo_offline', JSON.stringify(categorias));
+      setCategoriasCache(categorias);
       setCargandoPlanes(false);
-    } else if (!isOnline && cacheLocal) {
-      setPlanesCache(cacheLocal);
+    } else if (!isOnline && Array.isArray(guardadas) && guardadas.length > 0) {
+      setCategoriasCache(guardadas);
       setCargandoPlanes(false);
     } else if (!loadingPlanesOriginal) {
       setCargandoPlanes(false);
     }
-  }, [planesFibraSimetrica, planesFibraAsimetrica, planesSolitTV, planesHibridos, planesAntenaWireless, loadingPlanesOriginal, isOnline]);
+  }, [categorias, loadingPlanesOriginal, isOnline]);
 
   // MONITOR OFFLINE/ONLINE
   useEffect(() => {
@@ -799,11 +788,7 @@ const NuevoProspect = ({
             {cargandoPlanes ? (<CircularProgress />) : (
               <SeleccionPlanesCanvaceo
                 planSeleccionado={planInteres} onPlanSeleccionado={setPlanInteres}
-                planesFibraSimetrica={planesCache.simetrica}
-                planesFibraAsimetrica={planesCache.asimetrica}
-                planesSolitTV={planesCache.tv}
-                planesHibridos={planesCache.hibridos}
-                planesAntenaWireless={planesCache.wireless}
+                categorias={categoriasCache}
               />
             )}
             <TextField

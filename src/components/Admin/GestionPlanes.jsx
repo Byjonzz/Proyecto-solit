@@ -6,25 +6,26 @@ import {
   CircularProgress
 } from '@mui/material';
 import {
-  Add, Edit, Delete, Save, Close, Speed, CheckCircle, PhoneAndroid, Router
+  Add, Edit, Delete, Save, Close, Speed, CheckCircle, PhoneAndroid, Router,
+  KeyboardArrowUp, KeyboardArrowDown
 } from '@mui/icons-material';
 import api from '../../services/api';
+import { useCategorias } from '../../hooks/useCategorias';
+import {
+  categoriasCatalogoService, AMBITOS, ICONOS_CATEGORIA, VISTAS_CATEGORIA
+} from '../../services/categoriasCatalogoService';
 
-const CATEGORIAS_INTERNET = {
-  FIBRA_SIMETRICA: 'Fibra Simétrica',
-  FIBRA_ASIMETRICA: 'Fibra Asimétrica',
-  SOLIT_TV: 'Solit + TV',
-  HIBRIDO: 'Híbrido',
-  ANTENA_WIRELESS: 'Antena/Wireless'
-};
-
-const CATEGORIAS_CHIPS = {
-  DIAS_7: '7 Días',
-  DIAS_15: '15 Días',
-  DIAS_30: '30 Días',
-  DIAS_90: '90 Días',
-  DIAS_180: '180 Días',
-  DIAS_365: '365 Días'
+// Las categorías ya no viven aquí: son un catálogo editable desde esta misma
+// pantalla (el botón "Categorías"), y de ahí las leen también el formulario de
+// contrato y el de prospectos.
+const FORM_CATEGORIA_VACIO = {
+  nombre: '',
+  color: '#1976d2',
+  descripcion: '',
+  icono: 'fibra',
+  vista: 'tarjetas',
+  orden: 0,
+  activo: true
 };
 
 const COLORES_PASTEL = [
@@ -79,6 +80,15 @@ const GestionPlanes = ({ usuarioActual }) => {
   
   const [categoriaActivaInternet, setCategoriaActivaInternet] = useState(0);
   const [categoriaActivaChip, setCategoriaActivaChip] = useState(0);
+
+  // Catálogo editable de pestañas, por ámbito.
+  const { categorias: catalogoInternet, refetch: refetchInternet } = useCategorias(AMBITOS.INTERNET);
+  const { categorias: catalogoChips, refetch: refetchChips } = useCategorias(AMBITOS.CHIP);
+
+  const [dialogoCategorias, setDialogoCategorias] = useState(null); // 'internet' | 'chip'
+  const [categoriaEditando, setCategoriaEditando] = useState(null);
+  const [formCategoria, setFormCategoria] = useState(FORM_CATEGORIA_VACIO);
+  const [guardandoCategoria, setGuardandoCategoria] = useState(false);
   
   const [dialogOpen, setDialogOpen] = useState(false);
   const [tipoModal, setTipoModal] = useState('internet');
@@ -142,7 +152,7 @@ const GestionPlanes = ({ usuarioActual }) => {
       setPlanEditando(plan);
       setFormData({ 
         nombre: plan.nombre || '',
-        categoria: plan.categoria || CATEGORIAS_INTERNET.FIBRA_SIMETRICA,
+        categoria: plan.categoria || categoriasInternetList[0] || '',
         precio: plan.precio || '',
         descarga: plan.descarga || '',
         subida: plan.subida || '',
@@ -158,7 +168,7 @@ const GestionPlanes = ({ usuarioActual }) => {
       setPlanEditando(null);
       setFormData({
         nombre: '',
-        categoria: Object.values(CATEGORIAS_INTERNET)[categoriaActivaInternet],
+        categoria: categoriasInternetList[categoriaActivaInternet] || '',
         precio: '',
         descarga: '',
         subida: '',
@@ -180,7 +190,7 @@ const GestionPlanes = ({ usuarioActual }) => {
       setPlanEditando(plan);
       setFormData({ 
         nombre: plan.nombre || '',
-        categoria: plan.categoria || CATEGORIAS_CHIPS.DIAS_7,
+        categoria: plan.categoria || categoriasChipsList[0] || '',
         precio: plan.precio || '',
         datos: plan.datos || plan.descarga || '',
         llamadas: plan.llamadas || plan.subida || '',
@@ -195,7 +205,7 @@ const GestionPlanes = ({ usuarioActual }) => {
       setPlanEditando(null);
       setFormData({
         nombre: '',
-        categoria: Object.values(CATEGORIAS_CHIPS)[categoriaActivaChip],
+        categoria: categoriasChipsList[categoriaActivaChip] || '',
         precio: '',
         datos: '',
         llamadas: 'Ilimitadas',
@@ -346,22 +356,129 @@ const GestionPlanes = ({ usuarioActual }) => {
     }
   };
 
-  const getCardColorInternet = (categoria) => {
-    const colors = {
-      [CATEGORIAS_INTERNET.FIBRA_SIMETRICA]: '#d63384',
-      [CATEGORIAS_INTERNET.FIBRA_ASIMETRICA]: '#4CAF50',
-      [CATEGORIAS_INTERNET.SOLIT_TV]: '#9c27b0',
-      [CATEGORIAS_INTERNET.HIBRIDO]: '#26a69a',
-      [CATEGORIAS_INTERNET.ANTENA_WIRELESS]: '#7c4dff'
-    };
-    return colors[categoria] || '#1976d2';
-  };
+  const getCardColorInternet = (categoria) =>
+    catalogoInternet.find(c => c.nombre === categoria)?.color || '#1976d2';
 
-  const categoriasInternetList = Object.values(CATEGORIAS_INTERNET);
+  // Aquí se muestran todas, activas o no: desactivar una la quita del formulario
+  // de venta, pero administración tiene que poder seguir viendo sus planes.
+  const categoriasInternetList = catalogoInternet.map(c => c.nombre);
   const planesInternetFiltrados = planesInternet.filter(p => p.categoria === categoriasInternetList[categoriaActivaInternet]);
 
-  const categoriasChipsList = Object.values(CATEGORIAS_CHIPS);
+  const categoriasChipsList = catalogoChips.map(c => c.nombre);
   const planesChipsFiltrados = planesSim.filter(p => p.categoria === categoriasChipsList[categoriaActivaChip]);
+
+  // Qué campos pide el formulario ya no depende del nombre de la categoría
+  // —que ahora se puede renombrar— sino de cómo pidió dibujarse: las de tabla
+  // llevan una sola velocidad, las de tarjetas llevan descarga y subida.
+  const categoriaDelFormulario = catalogoInternet.find(c => c.nombre === formData.categoria);
+  const categoriaEsTabla = (categoriaDelFormulario?.vista || 'tarjetas') === 'tabla';
+
+  // ===== Catálogo de categorías =====
+  const catalogoActivo = dialogoCategorias === AMBITOS.CHIP ? catalogoChips : catalogoInternet;
+
+  const abrirCategorias = (ambito) => {
+    setDialogoCategorias(ambito);
+    setCategoriaEditando(null);
+    setFormCategoria(FORM_CATEGORIA_VACIO);
+  };
+
+  const editarCategoria = (cat) => {
+    setCategoriaEditando(cat);
+    setFormCategoria({
+      nombre: cat.nombre || '',
+      color: cat.color || '#1976d2',
+      descripcion: cat.descripcion || '',
+      icono: cat.icono || 'fibra',
+      vista: cat.vista || 'tarjetas',
+      orden: cat.orden ?? 0,
+      activo: cat.activo !== undefined ? cat.activo : true
+    });
+  };
+
+  const refrescarCatalogo = async () => {
+    await Promise.all([refetchInternet(), refetchChips()]);
+    // Renombrar arrastra la categoría de los planes, así que la lista de planes
+    // que está en pantalla también quedó vieja.
+    await cargarPlanes();
+  };
+
+  const guardarCategoria = async () => {
+    const nombre = formCategoria.nombre.trim();
+    if (!nombre) {
+      mostrarMensaje('El nombre de la categoría es obligatorio', 'error');
+      return;
+    }
+
+    setGuardandoCategoria(true);
+    try {
+      const datos = { ...formCategoria, nombre, ambito: dialogoCategorias };
+
+      if (categoriaEditando) {
+        await categoriasCatalogoService.actualizar(categoriaEditando.id, datos);
+        mostrarMensaje(
+          categoriaEditando.nombre !== nombre
+            ? `Categoría renombrada a "${nombre}". Sus planes se actualizaron solos.`
+            : 'Categoría actualizada',
+          'success'
+        );
+      } else {
+        await categoriasCatalogoService.crear({
+          ...datos,
+          orden: catalogoActivo.length
+        });
+        mostrarMensaje(`Categoría "${nombre}" creada`, 'success');
+      }
+
+      setCategoriaEditando(null);
+      setFormCategoria(FORM_CATEGORIA_VACIO);
+      await refrescarCatalogo();
+    } catch (error) {
+      const datosError = error.response?.data;
+      const detalle = datosError ? JSON.stringify(datosError) : error.message;
+      mostrarMensaje('No se pudo guardar la categoría: ' + detalle, 'error');
+    } finally {
+      setGuardandoCategoria(false);
+    }
+  };
+
+  const eliminarCategoria = async (cat) => {
+    if (cat.total_items > 0) {
+      mostrarMensaje(
+        `"${cat.nombre}" tiene ${cat.total_items} plan(es). Muévelos a otra categoría o desactívala en vez de borrarla.`,
+        'error'
+      );
+      return;
+    }
+    try {
+      await categoriasCatalogoService.eliminar(cat.id);
+      mostrarMensaje(`Categoría "${cat.nombre}" eliminada`, 'success');
+      if (categoriaEditando?.id === cat.id) {
+        setCategoriaEditando(null);
+        setFormCategoria(FORM_CATEGORIA_VACIO);
+      }
+      await refrescarCatalogo();
+    } catch (error) {
+      mostrarMensaje('No se pudo eliminar la categoría', 'error');
+    }
+  };
+
+  /** Sube o baja una categoría intercambiando el orden con su vecina. */
+  const moverCategoria = async (cat, direccion) => {
+    const lista = [...catalogoActivo];
+    const i = lista.findIndex(c => c.id === cat.id);
+    const j = i + direccion;
+    if (i < 0 || j < 0 || j >= lista.length) return;
+
+    try {
+      await Promise.all([
+        categoriasCatalogoService.actualizar(lista[i].id, { orden: j }),
+        categoriasCatalogoService.actualizar(lista[j].id, { orden: i })
+      ]);
+      await refrescarCatalogo();
+    } catch (error) {
+      mostrarMensaje('No se pudo cambiar el orden', 'error');
+    }
+  };
 
   if (loading && planesInternet.length === 0 && planesSim.length === 0) {
     return (
@@ -392,17 +509,26 @@ const GestionPlanes = ({ usuarioActual }) => {
         </Box>
       </Box>
 
-      <Tabs 
-        value={categoriaActivaInternet} 
-        onChange={(e, newValue) => setCategoriaActivaInternet(newValue)}
-        sx={{ mb: 3 }}
-        variant="scrollable"
-        scrollButtons="auto"
-      >
-        {categoriasInternetList.map((cat, idx) => (
-          <Tab key={idx} label={cat} />
-        ))}
-      </Tabs>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3, flexWrap: 'wrap' }}>
+        <Tabs
+          value={Math.min(categoriaActivaInternet, Math.max(categoriasInternetList.length - 1, 0))}
+          onChange={(e, newValue) => setCategoriaActivaInternet(newValue)}
+          variant="scrollable"
+          scrollButtons="auto"
+          sx={{ flex: 1, minWidth: 240 }}
+        >
+          {categoriasInternetList.map((cat, idx) => (
+            <Tab key={idx} label={cat} />
+          ))}
+        </Tabs>
+        <Button
+          variant="outlined" startIcon={<Edit />}
+          onClick={() => abrirCategorias(AMBITOS.INTERNET)}
+          sx={{ textTransform: 'none', whiteSpace: 'nowrap' }}
+        >
+          Categorías
+        </Button>
+      </Box>
 
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h6">
@@ -530,17 +656,26 @@ const GestionPlanes = ({ usuarioActual }) => {
         </Box>
       </Box>
 
-      <Tabs 
-        value={categoriaActivaChip} 
-        onChange={(e, newValue) => setCategoriaActivaChip(newValue)}
-        sx={{ mb: 3 }}
-        variant="scrollable"
-        scrollButtons="auto"
-      >
-        {categoriasChipsList.map((cat, idx) => (
-          <Tab key={idx} label={cat} />
-        ))}
-      </Tabs>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3, flexWrap: 'wrap' }}>
+        <Tabs
+          value={Math.min(categoriaActivaChip, Math.max(categoriasChipsList.length - 1, 0))}
+          onChange={(e, newValue) => setCategoriaActivaChip(newValue)}
+          variant="scrollable"
+          scrollButtons="auto"
+          sx={{ flex: 1, minWidth: 240 }}
+        >
+          {categoriasChipsList.map((cat, idx) => (
+            <Tab key={idx} label={cat} />
+          ))}
+        </Tabs>
+        <Button
+          variant="outlined" startIcon={<Edit />}
+          onClick={() => abrirCategorias(AMBITOS.CHIP)}
+          sx={{ textTransform: 'none', whiteSpace: 'nowrap' }}
+        >
+          Categorías
+        </Button>
+      </Box>
 
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h6">
@@ -782,7 +917,7 @@ const GestionPlanes = ({ usuarioActual }) => {
 
             {tipoModal === 'internet' && (
               <>
-                {formData.categoria !== CATEGORIAS_INTERNET.HIBRIDO && formData.categoria !== CATEGORIAS_INTERNET.ANTENA_WIRELESS && (
+                {!categoriaEsTabla && (
                   <>
                     <Grid container spacing={2} sx={{ mb: 2 }}>
                       <Grid item xs={6}>
@@ -793,12 +928,12 @@ const GestionPlanes = ({ usuarioActual }) => {
                       </Grid>
                     </Grid>
                     <FormControlLabel control={<Switch checked={formData.simetrica} onChange={(e) => setFormData({ ...formData, simetrica: e.target.checked })}/>} label="Conexión Simétrica" sx={{ mb: 2, display: 'block' }}/>
-                    {formData.categoria === CATEGORIAS_INTERNET.SOLIT_TV && (
-                      <TextField fullWidth label="Canales" value={formData.canales} onChange={(e) => setFormData({ ...formData, canales: e.target.value })} sx={{ mb: 2 }} placeholder="Ej: 47 (41 HD / 6 SD)" />
+                    {(
+                      <TextField fullWidth label="Canales (opcional)" value={formData.canales} onChange={(e) => setFormData({ ...formData, canales: e.target.value })} sx={{ mb: 2 }} placeholder="Ej: 47 (41 HD / 6 SD)" />
                     )}
                   </>
                 )}
-                {(formData.categoria === CATEGORIAS_INTERNET.HIBRIDO || formData.categoria === CATEGORIAS_INTERNET.ANTENA_WIRELESS) && (
+                {categoriaEsTabla && (
                   <TextField fullWidth label="Velocidad (Mbps)" value={formData.velocidad} onChange={(e) => setFormData({ ...formData, velocidad: e.target.value })} sx={{ mb: 2 }} />
                 )}
               </>
@@ -838,6 +973,174 @@ const GestionPlanes = ({ usuarioActual }) => {
           >
             {loading ? 'Guardando...' : (modoEdicion ? 'Actualizar' : 'Guardar Plan')}
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ===== Catálogo de categorías (las pestañas) ===== */}
+      <Dialog
+        open={Boolean(dialogoCategorias)}
+        onClose={() => !guardandoCategoria && setDialogoCategorias(null)}
+        maxWidth="md" fullWidth
+        slotProps={{ paper: { sx: { borderRadius: 3 } } }}
+      >
+        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 700 }}>
+          Categorías de {dialogoCategorias === AMBITOS.CHIP ? 'chips' : 'planes de internet'}
+          <IconButton onClick={() => setDialogoCategorias(null)} disabled={guardandoCategoria}><Close /></IconButton>
+        </DialogTitle>
+
+        <DialogContent dividers>
+          <Alert severity="info" sx={{ mb: 2 }}>
+            Estas son las pestañas que ve el vendedor. Al renombrar una,
+            <strong> sus planes se mueven solos</strong> y el cambio aparece en el formulario
+            de contrato y en el de prospectos sin que nadie recargue.
+          </Alert>
+
+          <Grid container spacing={3}>
+            <Grid item xs={12} md={7}>
+              {catalogoActivo.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  Todavía no hay categorías. Crea la primera con el formulario de al lado.
+                </Typography>
+              ) : catalogoActivo.map((cat, idx) => (
+                <Paper
+                  key={cat.id}
+                  variant="outlined"
+                  sx={{
+                    p: 1.2, mb: 1, borderRadius: 2, display: 'flex', alignItems: 'center', gap: 1,
+                    borderLeft: `5px solid ${cat.color}`,
+                    opacity: cat.activo ? 1 : 0.55,
+                    borderColor: categoriaEditando?.id === cat.id ? cat.color : '#e2e8f0',
+                    borderWidth: categoriaEditando?.id === cat.id ? 2 : 1
+                  }}
+                >
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                      {cat.nombre}
+                      {!cat.activo && <Chip label="Oculta" size="small" sx={{ ml: 1 }} />}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {cat.total_items} plan(es) · vista {cat.vista}
+                    </Typography>
+                  </Box>
+
+                  <Tooltip title="Subir">
+                    <span>
+                      <IconButton size="small" disabled={idx === 0} onClick={() => moverCategoria(cat, -1)}>
+                        <KeyboardArrowUp fontSize="small" />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                  <Tooltip title="Bajar">
+                    <span>
+                      <IconButton size="small" disabled={idx === catalogoActivo.length - 1} onClick={() => moverCategoria(cat, 1)}>
+                        <KeyboardArrowDown fontSize="small" />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                  <Tooltip title="Editar">
+                    <IconButton size="small" color="primary" onClick={() => editarCategoria(cat)}>
+                      <Edit fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title={cat.total_items > 0 ? 'Tiene planes: muévelos u ocúltala' : 'Eliminar'}>
+                    <span>
+                      <IconButton size="small" color="error" onClick={() => eliminarCategoria(cat)}>
+                        <Delete fontSize="small" />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                </Paper>
+              ))}
+            </Grid>
+
+            <Grid item xs={12} md={5}>
+              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1.5 }}>
+                  {categoriaEditando ? `Editar "${categoriaEditando.nombre}"` : 'Nueva categoría'}
+                </Typography>
+
+                <TextField
+                  fullWidth size="small" label="Nombre *" sx={{ mb: 1.5 }}
+                  value={formCategoria.nombre}
+                  onChange={(e) => setFormCategoria({ ...formCategoria, nombre: e.target.value })}
+                  helperText={categoriaEditando && categoriaEditando.total_items > 0
+                    ? `Se renombrarán también sus ${categoriaEditando.total_items} plan(es).`
+                    : 'Es el texto de la pestaña.'}
+                />
+
+                <TextField
+                  fullWidth size="small" label="Descripción" sx={{ mb: 1.5 }}
+                  value={formCategoria.descripcion}
+                  onChange={(e) => setFormCategoria({ ...formCategoria, descripcion: e.target.value })}
+                  helperText="Frase corta bajo la pestaña. Opcional."
+                />
+
+                <Box sx={{ display: 'flex', gap: 1.5, mb: 1.5 }}>
+                  <TextField
+                    type="color" size="small" label="Color" sx={{ width: 110 }}
+                    value={formCategoria.color}
+                    onChange={(e) => setFormCategoria({ ...formCategoria, color: e.target.value })}
+                    slotProps={{ inputLabel: { shrink: true } }}
+                  />
+                  <TextField
+                    select fullWidth size="small" label="Icono"
+                    value={formCategoria.icono}
+                    onChange={(e) => setFormCategoria({ ...formCategoria, icono: e.target.value })}
+                  >
+                    {ICONOS_CATEGORIA.map(i => (
+                      <MenuItem key={i.clave} value={i.clave}>{i.etiqueta}</MenuItem>
+                    ))}
+                  </TextField>
+                </Box>
+
+                <TextField
+                  select fullWidth size="small" label="Cómo se muestran sus planes" sx={{ mb: 1.5 }}
+                  value={formCategoria.vista}
+                  onChange={(e) => setFormCategoria({ ...formCategoria, vista: e.target.value })}
+                  helperText="Tabla: una sola velocidad. Tarjetas: descarga y subida."
+                >
+                  {VISTAS_CATEGORIA.map(v => (
+                    <MenuItem key={v.clave} value={v.clave}>{v.etiqueta}</MenuItem>
+                  ))}
+                </TextField>
+
+                <FormControlLabel
+                  sx={{ mb: 1 }}
+                  control={
+                    <Switch
+                      checked={formCategoria.activo}
+                      onChange={(e) => setFormCategoria({ ...formCategoria, activo: e.target.checked })}
+                    />
+                  }
+                  label="Visible para el vendedor"
+                />
+
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <Button
+                    variant="contained" fullWidth
+                    startIcon={guardandoCategoria ? <CircularProgress size={16} color="inherit" /> : <Save />}
+                    onClick={guardarCategoria}
+                    disabled={guardandoCategoria}
+                  >
+                    {categoriaEditando ? 'Guardar cambios' : 'Crear categoría'}
+                  </Button>
+                  {categoriaEditando && (
+                    <Button
+                      color="inherit"
+                      onClick={() => { setCategoriaEditando(null); setFormCategoria(FORM_CATEGORIA_VACIO); }}
+                      disabled={guardandoCategoria}
+                    >
+                      Nueva
+                    </Button>
+                  )}
+                </Box>
+              </Paper>
+            </Grid>
+          </Grid>
+        </DialogContent>
+
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={() => setDialogoCategorias(null)} disabled={guardandoCategoria}>Cerrar</Button>
         </DialogActions>
       </Dialog>
     </Box>

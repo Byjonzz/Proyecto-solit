@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Typography,
@@ -25,6 +25,23 @@ import {
   SignalCellularAlt
 } from '@mui/icons-material';
 import { usePlanes } from '../../hooks/usePlanes';
+
+// Cada categoría guarda el nombre lógico de su icono y aquí se traduce al set de
+// esta pantalla. Así el catálogo no depende de qué iconos tenga instalado el
+// frontend, y uno desconocido cae en el genérico en vez de romper la vista.
+const ICONOS = {
+  fibra: FiberManualRecord,
+  wifi: Wifi,
+  tv: Tv,
+  antena: SignalCellularAlt,
+  trofeo: EmojiEvents,
+  chip: SignalCellularAlt
+};
+
+const IconoCategoria = ({ clave, color }) => {
+  const Icono = ICONOS[clave] || FiberManualRecord;
+  return <Icono sx={{ color, fontSize: 14 }} />;
+};
 
 const TarjetaPlan = ({ plan, seleccionado, onSelect }) => {
   return (
@@ -190,20 +207,19 @@ const TablaPlanes = ({ planes, seleccionadoId, onSelect, titulo, subtitulo, colo
 };
 
 const SeleccionPlanes = ({ planSeleccionado, onPlanSeleccionado }) => {
-  const {
-    planesFibraSimetrica,
-    planesFibraAsimetrica,
-    planesSolitTV,
-    planesHibridos,
-    planesAntenaWireless,
-    loading,
-    error
-  } = usePlanes();
+  const { categorias, loading, error } = usePlanes();
 
   const [tabActiva, setTabActiva] = useState(0);
-  const handleChangeTab = (event, newValue) => { 
-    setTabActiva(newValue); 
+  const handleChangeTab = (event, newValue) => {
+    setTabActiva(newValue);
   };
+
+  // El catálogo se refresca solo: si administración borra o desactiva la
+  // categoría que estaba abierta, hay que volver a una válida o la vista se
+  // quedaría en blanco.
+  useEffect(() => {
+    if (tabActiva > categorias.length - 1) setTabActiva(0);
+  }, [categorias.length, tabActiva]);
   const handleSeleccionar = (plan) => { 
     onPlanSeleccionado(plan); 
   };
@@ -227,8 +243,7 @@ const SeleccionPlanes = ({ planSeleccionado, onPlanSeleccionado }) => {
     );
   }
 
-  if (planesFibraSimetrica.length === 0 && planesFibraAsimetrica.length === 0 && 
-      planesSolitTV.length === 0 && planesHibridos.length === 0 && planesAntenaWireless.length === 0) {
+  if (categorias.length === 0) {
     return (
       <Alert severity="info" sx={{ my: 2 }}>
         No hay planes disponibles. Por favor, crea planes en el módulo de Administración.
@@ -236,69 +251,9 @@ const SeleccionPlanes = ({ planSeleccionado, onPlanSeleccionado }) => {
     );
   }
 
-  const tabsDisponibles = [];
-  
-  if (planesFibraSimetrica.length > 0) {
-    tabsDisponibles.push({
-      label: 'Fibra Simétrica',
-      icon: <FiberManualRecord sx={{ color: '#2196F3', fontSize: 14 }} />,
-      planes: planesFibraSimetrica,
-      mensaje: ' Subida y bajada a la misma velocidad',
-      colorBg: '#e3f2fd',
-      colorBorder: '#2196F3',
-      colorTexto: '#1565c0'
-    });
-  }
-  
-  if (planesFibraAsimetrica.length > 0) {
-    tabsDisponibles.push({
-      label: 'Fibra Asimétrica',
-      icon: <Wifi sx={{ color: '#4CAF50', fontSize: 14 }} />,
-      planes: planesFibraAsimetrica,
-      mensaje: ' Mayor velocidad de descarga',
-      colorBg: '#e8f5e9',
-      colorBorder: '#4CAF50',
-      colorTexto: '#2e7d32'
-    });
-  }
-  
-  if (planesSolitTV.length > 0) {
-    tabsDisponibles.push({
-      label: 'Solit + TV',
-      icon: <Tv sx={{ color: '#9c27b0', fontSize: 14 }} />,
-      planes: planesSolitTV,
-      mensaje: ' Internet + Televisión',
-      colorBg: '#f3e5f5',
-      colorBorder: '#9c27b0',
-      colorTexto: '#7b1fa2'
-    });
-  }
-  
-  if (planesHibridos.length > 0) {
-    tabsDisponibles.push({
-      label: 'Híbrido',
-      icon: <EmojiEvents sx={{ color: '#ff9800', fontSize: 14 }} />,
-      planes: planesHibridos,
-      mensaje: ' Zonas sin fibra',
-      colorBg: '#e0f7fa',
-      colorBorder: '#26a69a',
-      colorTexto: '#006064',
-      esTabla: true
-    });
-  }
-  
-  if (planesAntenaWireless.length > 0) {
-    tabsDisponibles.push({
-      label: 'Antena/Wireless',
-      icon: <SignalCellularAlt sx={{ color: '#7c4dff', fontSize: 14 }} />,
-      planes: planesAntenaWireless,
-      mensaje: ' Zonas sin fibra',
-      colorBg: '#f3e5f5',
-      colorBorder: '#7c4dff',
-      colorTexto: '#6a1b9a',
-      esTabla: true
-    });
-  }
+  // El color de la pestaña activa manda sobre el subrayado, para que al
+  // renombrar o recolorear una categoría todo se mueva junto.
+  const colorActivo = categorias[tabActiva]?.color || '#d63384';
 
   return (
     <Box sx={{ width: '100%' }}>
@@ -313,45 +268,47 @@ const SeleccionPlanes = ({ planSeleccionado, onPlanSeleccionado }) => {
         scrollButtons="auto" 
         sx={{ 
           mb: 2, 
-          '& .MuiTab-root': { fontWeight: 700, textTransform: 'none', fontSize: '0.75rem', minHeight: 36, py: 0.8 }, 
-          '& .Mui-selected': { color: '#d63384 !important' }, 
-          '& .MuiTabs-indicator': { backgroundColor: '#d63384' } 
+          '& .MuiTab-root': { fontWeight: 700, textTransform: 'none', fontSize: '0.75rem', minHeight: 36, py: 0.8 },
+          '& .Mui-selected': { color: `${colorActivo} !important` },
+          '& .MuiTabs-indicator': { backgroundColor: colorActivo }
         }}
       >
-        {tabsDisponibles.map((tab, index) => (
-          <Tab 
-            key={index}
-            icon={tab.icon} 
-            label={tab.label} 
-            iconPosition="start" 
+        {categorias.map((cat) => (
+          <Tab
+            key={cat.id}
+            icon={<IconoCategoria clave={cat.icono} color={cat.color} />}
+            label={cat.nombre}
+            iconPosition="start"
           />
         ))}
       </Tabs>
-      
+
       <Box sx={{ minHeight: 400 }}>
-        {tabsDisponibles.map((tab, index) => (
+        {categorias.map((cat, index) => (
           tabActiva === index && (
-            <Box key={index}>
-              <Box sx={{ mb: 2, p: 1, backgroundColor: tab.colorBg, borderRadius: 1, borderLeft: `3px solid ${tab.colorBorder}` }}>
-                <Typography variant="caption" sx={{ fontWeight: 600, color: tab.colorTexto, fontSize: '0.75rem' }}>
-                  {tab.mensaje}
-                </Typography>
-              </Box>
-              
-              {tab.esTabla ? (
+            <Box key={cat.id}>
+              {cat.descripcion && (
+                <Box sx={{ mb: 2, p: 1, backgroundColor: cat.colorFondo, borderRadius: 1, borderLeft: `3px solid ${cat.colorBorde}` }}>
+                  <Typography variant="caption" sx={{ fontWeight: 600, color: cat.colorTexto, fontSize: '0.75rem' }}>
+                    {cat.descripcion}
+                  </Typography>
+                </Box>
+              )}
+
+              {cat.esTabla ? (
                 <Box sx={{ maxWidth: 600 }}>
-                  <TablaPlanes 
-                    planes={tab.planes} 
-                    seleccionadoId={planSeleccionado?.id} 
-                    onSelect={handleSeleccionar} 
-                    titulo={tab.label.toUpperCase()} 
-                    subtitulo="Zonas sin fibra" 
-                    colorPrincipal={tab.colorBorder} 
+                  <TablaPlanes
+                    planes={cat.planes}
+                    seleccionadoId={planSeleccionado?.id}
+                    onSelect={handleSeleccionar}
+                    titulo={cat.nombre.toUpperCase()}
+                    subtitulo={cat.descripcion || ''}
+                    colorPrincipal={cat.colorBorde}
                   />
                 </Box>
               ) : (
                 <Grid container spacing={1.5}>
-                  {tab.planes.map((plan) => (
+                  {cat.planes.map((plan) => (
                     <Grid size={{ xs: 12, sm: 4 }} key={plan.id}>
                       <TarjetaPlan 
                         plan={plan} 

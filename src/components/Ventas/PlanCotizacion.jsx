@@ -75,15 +75,9 @@ const PlanCotizacion = ({
   const { createContrato, loading: loadingContrato } = useContratos();
 
   
-  const {
-    planesFibraSimetrica, planesFibraAsimetrica, planesSolitTV,
-    planesHibridos, planesAntenaWireless
-  } = usePlanes();
-
-  const todosLosPlanes = useMemo(() => [
-    ...planesFibraSimetrica, ...planesFibraAsimetrica, ...planesSolitTV,
-    ...planesHibridos, ...planesAntenaWireless
-  ], [planesFibraSimetrica, planesFibraAsimetrica, planesSolitTV, planesHibridos, planesAntenaWireless]);
+  // Todos los planes activos, sin importar de qué pestaña sean: aquí solo se
+  // usan para reencontrar por nombre el plan que traía el prospecto.
+  const { todosLosPlanes } = usePlanes();
 
   const [activeStep, setActiveStep] = useState(0);
   const [guardado, setGuardado] = useState(false);
