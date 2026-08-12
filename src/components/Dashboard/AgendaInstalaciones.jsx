@@ -138,6 +138,7 @@ const AgendaInstalaciones = () => {
     setOrdenRechazo(orden);
     setMotivosMarcados([]);
     setMotivoLibre('');
+    setErrorAsignacion(null);
   };
 
   const toggleMotivo = (clave) => {
@@ -155,8 +156,10 @@ const AgendaInstalaciones = () => {
       .map(m => m.etiqueta);
     if (motivoLibre.trim()) textos.push(motivoLibre.trim());
 
+    // Vale con marcar una casilla o con escribir el motivo: lo que no vale es
+    // devolver el contrato sin decir qué corregir.
     if (textos.length === 0) {
-      setErrorAsignacion('Marca al menos un motivo para que el canvaceador sepa qué corregir.');
+      setErrorAsignacion('Marca un motivo o escribe por qué lo regresas: es lo único que verá el canvaceador.');
       return;
     }
 
@@ -183,6 +186,7 @@ const AgendaInstalaciones = () => {
     setOrdenCancelacion(orden);
     setMotivosCancelacion([]);
     setMotivoCancelacionLibre('');
+    setErrorAsignacion(null);
   };
 
   const toggleMotivoCancelacion = (clave) => {
@@ -199,10 +203,10 @@ const AgendaInstalaciones = () => {
       .map(m => m.etiqueta);
     if (motivoCancelacionLibre.trim()) textos.push(motivoCancelacionLibre.trim());
 
-    // Sin motivo el registro no sirve de nada: dentro de tres meses nadie va a
-    // saber por qué se cayó esta venta.
+    // Vale con marcar una casilla o con escribirlo. Lo que no vale es cancelar
+    // sin motivo: dentro de tres meses nadie sabría por qué se cayó esta venta.
     if (textos.length === 0) {
-      setErrorAsignacion('Marca al menos un motivo: es lo único que queda del contrato como registro.');
+      setErrorAsignacion('Marca un motivo o escribe por qué se cayó: es lo único que queda del contrato como registro.');
       return;
     }
 
@@ -1630,12 +1634,18 @@ const AgendaInstalaciones = () => {
             ))}
           </Stack>
 
+          {/* Sin casillas marcadas este campo es el único motivo que le llega al
+              canvaceador, así que ahí deja de ser opcional. */}
           <TextField
-            label="Detalle adicional (opcional)"
+            label={motivosMarcados.length === 0 ? 'Motivo del rechazo *' : 'Detalle adicional (opcional)'}
             placeholder="Ej. El recibo es de otro domicilio"
             fullWidth multiline rows={2} size="small" sx={{ mt: 2 }}
             value={motivoLibre}
-            onChange={(e) => setMotivoLibre(e.target.value)}
+            onChange={(e) => { setMotivoLibre(e.target.value); setErrorAsignacion(null); }}
+            required={motivosMarcados.length === 0}
+            helperText={motivosMarcados.length === 0
+              ? 'Si ninguna opción de arriba aplica, escribe aquí por qué lo regresas.'
+              : 'Opcional: agrega detalle al motivo marcado.'}
           />
 
           <Alert severity="info" sx={{ mt: 2 }}>
@@ -1643,6 +1653,9 @@ const AgendaInstalaciones = () => {
             y solo podrá reemplazar las fotos.
           </Alert>
 
+          {/* El error de la página se dibuja detrás del diálogo, así que aquí
+              hace falta su propia copia o el usuario no ve por qué falló. */}
+          {errorAsignacion && <Alert severity="error" sx={{ mt: 2 }}>{errorAsignacion}</Alert>}
         </DialogContent>
 
         <DialogActions sx={{ p: 2 }}>
@@ -1650,7 +1663,7 @@ const AgendaInstalaciones = () => {
           <Button
             variant="contained" color="error" startIcon={rechazando ? <CircularProgress size={16} color="inherit" /> : <Cancel />}
             onClick={handleConfirmarRechazo}
-            disabled={rechazando || motivosMarcados.length === 0}
+            disabled={rechazando || (motivosMarcados.length === 0 && !motivoLibre.trim())}
           >
             {rechazando ? 'Rechazando...' : 'Rechazar y devolver'}
           </Button>
@@ -1709,12 +1722,18 @@ const AgendaInstalaciones = () => {
             ))}
           </Stack>
 
+          {/* Sin casillas marcadas este texto es el único registro que queda de
+              por qué se cayó la venta, así que ahí deja de ser opcional. */}
           <TextField
-            label="Detalle adicional (opcional)"
+            label={motivosCancelacion.length === 0 ? 'Motivo de la cancelación *' : 'Detalle adicional (opcional)'}
             placeholder="Ej. Dijo que lo vuelve a solicitar el próximo mes"
             fullWidth multiline rows={2} size="small" sx={{ mt: 2 }}
             value={motivoCancelacionLibre}
-            onChange={(e) => setMotivoCancelacionLibre(e.target.value)}
+            onChange={(e) => { setMotivoCancelacionLibre(e.target.value); setErrorAsignacion(null); }}
+            required={motivosCancelacion.length === 0}
+            helperText={motivosCancelacion.length === 0
+              ? 'Si ninguna opción de arriba aplica, escribe aquí por qué se cayó la venta.'
+              : 'Opcional: agrega detalle al motivo marcado.'}
           />
 
           <Alert severity="warning" sx={{ mt: 2 }}>
@@ -1723,6 +1742,8 @@ const AgendaInstalaciones = () => {
             solo lectura: no podrá editarlo ni reenviarlo.
           </Alert>
 
+          {/* El error de la página queda detrás del diálogo; aquí va su copia. */}
+          {errorAsignacion && <Alert severity="error" sx={{ mt: 2 }}>{errorAsignacion}</Alert>}
         </DialogContent>
 
         <DialogActions sx={{ p: 2 }}>
@@ -1733,7 +1754,7 @@ const AgendaInstalaciones = () => {
             variant="contained"
             startIcon={cancelando ? <CircularProgress size={16} color="inherit" /> : <Block />}
             onClick={handleConfirmarCancelacion}
-            disabled={cancelando || motivosCancelacion.length === 0}
+            disabled={cancelando || (motivosCancelacion.length === 0 && !motivoCancelacionLibre.trim())}
             sx={{ bgcolor: '#475569', '&:hover': { bgcolor: '#334155' } }}
           >
             {cancelando ? 'Cancelando...' : 'Cancelar contrato'}
