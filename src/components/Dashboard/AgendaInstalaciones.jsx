@@ -3,7 +3,7 @@ import {
   Box, Typography, Table, TableBody, TableCell, TableContainer, TableHead,
   TableRow, Paper, Button, Chip, TextField, MenuItem, Stack, Alert,
   Dialog, DialogTitle, DialogContent, DialogActions, IconButton, Grid,
-  Card, Divider, CircularProgress, Badge, Tooltip
+  Card, Divider, CircularProgress, Badge, Tooltip, Checkbox, FormControlLabel
 } from '@mui/material';
 import {
   CalendarMonth, Close, EventAvailableOutlined, AssignmentOutlined,
@@ -17,7 +17,10 @@ import api from '../../services/api';
 import MapaRutaInstalacion from './MapaRutaInstalacion';
 import { aPuntoNumerico } from '../../utils/geo';
 import { formatearDuracion } from '../../services/rutaService';
-import { ESTADOS } from '../../services/instalacionesSeguimientoService';
+import {
+  ESTADOS, instalacionesSeguimientoService, fichaTecnicaDesdeFormulario
+} from '../../services/instalacionesSeguimientoService';
+import BotonEvidencia from '../Forms/BotonEvidencia';
 import {
   revisionContratosService, MOTIVOS_RECHAZO, MOTIVOS_CANCELACION
 } from '../../services/revisionContratosService';
@@ -26,7 +29,34 @@ import { esPdf } from '../../utils/evidencias';
 
 const MS_REFRESCO_SEGUIMIENTO = 2000;
 
-const AgendaInstalaciones = () => {
+// Quién puede cerrar una instalación desde el backoffice, tecleando los datos
+// que el técnico reporta por fuera. El técnico cierra desde su propia pantalla,
+// en campo; esto es el respaldo para cuando no lo hizo ahí.
+const ROLES_CIERRE_MANUAL = ['logistica', 'admin'];
+
+// Mismo normalizado que usa config/roles.js, para que un rol guardado como
+// "Logística" con acento no se quede fuera. La clase se arma desde string para
+// no dejar caracteres combinantes sueltos en el código fuente.
+const ACENTOS_COMBINANTES = new RegExp('[\\u0300-\\u036f]', 'g');
+const normalizarRol = (rol) => String(rol || '')
+  .toLowerCase().normalize('NFD').replace(ACENTOS_COMBINANTES, '').trim();
+
+const FORM_CIERRE_VACIO = {
+  verificar_equipos: false,
+  tendido_cable: false,
+  config_ont: false,
+  serial_ont: '',
+  serial_router: '',
+  metraje_fibra: '',
+  potencia_dbm: '',
+  tipo_instalacion: 'Residencial',
+  conectores_utilizados: 2,
+  notas_instalacion: '',
+  foto_comprobante: null
+};
+
+const AgendaInstalaciones = ({ usuarioActual }) => {
+  const puedeCerrarManual = ROLES_CIERRE_MANUAL.includes(normalizarRol(usuarioActual?.rol));
   const {
     contratos,
     loading,
@@ -221,6 +251,69 @@ const AgendaInstalaciones = () => {
       setErrorAsignacion('No se pudo cancelar el contrato: ' + (err.response?.data?.detail || err.message));
     } finally {
       setCancelando(false);
+    }
+  };
+
+  const [ordenCierre, setOrdenCierre] = useState(null);
+  const [formCierre, setFormCierre] = useState(FORM_CIERRE_VACIO);
+  const [cerrando, setCerrando] = useState(false);
+
+  const handleAbrirCierre = (orden) => {
+    setOrdenCierre(orden);
+    setFormCierre(FORM_CIERRE_VACIO);
+    setErrorAsignacion(null);
+  };
+
+  const cambiarCierre = (campo, valor) => setFormCierre(prev => ({ ...prev, [campo]: valor }));
+
+  const handleConfirmarCierre = async () => {
+    if (!ordenCierre) return;
+
+    // Los mismos tres obligatorios que le pide la app al técnico: si aquí se
+    // pidieran menos, el reporte saldría distinto según quién cerró.
+    if (!formCierre.serial_ont.trim() || !formCierre.potencia_dbm.trim() || !String(formCierre.metraje_fibra).trim()) {
+      setErrorAsignacion('Serial del ONT, potencia y metraje de fibra son obligatorios para cerrar.');
+      return;
+    }
+
+    // Mismo candado del comprobante que en la pantalla del técnico.
+    if (!ordenCierre.foto_recibo_luz && !formCierre.foto_comprobante) {
+      setErrorAsignacion('Falta el comprobante de domicilio: súbelo antes de cerrar la instalación.');
+      return;
+    }
+
+    if (!ordenCierre.instalacion_id) {
+      setErrorAsignacion('Esta orden no tiene instalación registrada. Reprográmala antes de cerrarla.');
+      return;
+    }
+
+    setCerrando(true);
+    setErrorAsignacion(null);
+    try {
+      // La ficha primero: si falla, la instalación sigue abierta y se reintenta,
+      // en vez de quedar cerrada y sin los datos del equipo.
+      await instalacionesSeguimientoService.guardarFichaTecnica(
+        ordenCierre.instalacion_id,
+        fichaTecnicaDesdeFormulario(formCierre)
+      );
+
+      const cambiosContrato = { estatus: 'Completado' };
+      if (formCierre.foto_comprobante) cambiosContrato.foto_recibo_luz = formCierre.foto_comprobante;
+      await api.patch(`/contratos/${ordenCierre.contrato_id}/`, cambiosContrato);
+
+      await instalacionesSeguimientoService.completar(ordenCierre.instalacion_id, {
+        observaciones: formCierre.notas_instalacion
+      });
+
+      setOrdenCierre(null);
+      setMensajeExito(true);
+      await Promise.all([refetchPendientesSilencioso(), cargarInstalacionesReales()]);
+    } catch (err) {
+      const datos = err.response?.data;
+      const detalle = datos ? (datos.detail || JSON.stringify(datos)) : err.message;
+      setErrorAsignacion('No se pudo completar la instalación: ' + detalle);
+    } finally {
+      setCerrando(false);
     }
   };
 
@@ -1097,6 +1190,20 @@ const AgendaInstalaciones = () => {
                           Notas
                         </Button>
 
+                        {/* Cierre desde el backoffice, solo para logística y
+                            admin: el técnico cierra desde su propia pantalla. */}
+                        {puedeCerrarManual && (
+                          <Tooltip title="Cerrar la instalación capturando los datos del técnico a mano">
+                            <Button
+                              variant="contained" size="small" color="success"
+                              startIcon={<AssignmentTurnedIn />}
+                              onClick={() => handleAbrirCierre(orden)}
+                              sx={{ textTransform: 'none', borderRadius: 1.5 }}
+                            >
+                              Completar
+                            </Button>
+                          </Tooltip>
+                        )}
                       </Stack>
                     )}
 
@@ -1758,6 +1865,147 @@ const AgendaInstalaciones = () => {
             sx={{ bgcolor: '#475569', '&:hover': { bgcolor: '#334155' } }}
           >
             {cancelando ? 'Cancelando...' : 'Cancelar contrato'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(ordenCierre)}
+        onClose={() => !cerrando && setOrdenCierre(null)}
+        maxWidth="sm"
+        fullWidth
+        slotProps={{ paper: { sx: { borderRadius: 3 } } }}
+      >
+        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <AssignmentTurnedIn sx={{ color: '#16a34a' }} />
+            <Typography variant="h6" component="span" sx={{ fontWeight: 700, color: '#15803d' }}>
+              Completar Folio: {ordenCierre?.id}
+            </Typography>
+          </Box>
+          <IconButton onClick={() => setOrdenCierre(null)} size="small" disabled={cerrando}><Close /></IconButton>
+        </DialogTitle>
+
+        <DialogContent dividers sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <Alert severity="info">
+            Cierre capturado desde oficina para <strong>{ordenCierre?.cliente}</strong>. Usa los
+            datos que te reportó el técnico: quedan guardados igual que si él hubiera
+            cerrado desde su pantalla.
+          </Alert>
+
+          <Box>
+            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>Checklist</Typography>
+            <FormControlLabel
+              control={<Checkbox checked={formCierre.verificar_equipos}
+                onChange={(e) => cambiarCierre('verificar_equipos', e.target.checked)} />}
+              label="Verificar equipos"
+            />
+            <FormControlLabel
+              control={<Checkbox checked={formCierre.tendido_cable}
+                onChange={(e) => cambiarCierre('tendido_cable', e.target.checked)} />}
+              label="Tendido de cable correcto"
+            />
+            <FormControlLabel
+              control={<Checkbox checked={formCierre.config_ont}
+                onChange={(e) => cambiarCierre('config_ont', e.target.checked)} />}
+              label="Configuración del ONT"
+            />
+          </Box>
+
+          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+            <TextField
+              sx={{ flex: '1 1 220px' }} size="small" required
+              label="Serial del ONT *"
+              value={formCierre.serial_ont}
+              onChange={(e) => cambiarCierre('serial_ont', e.target.value)}
+            />
+            <TextField
+              sx={{ flex: '1 1 220px' }} size="small"
+              label="Serial del Router"
+              value={formCierre.serial_router}
+              onChange={(e) => cambiarCierre('serial_router', e.target.value)}
+            />
+          </Box>
+
+          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+            <TextField
+              sx={{ flex: '1 1 220px' }} size="small" required
+              label="Metraje de fibra (m) *"
+              value={formCierre.metraje_fibra}
+              onChange={(e) => cambiarCierre('metraje_fibra', e.target.value.replace(/[^\d.]/g, ''))}
+              helperText="Solo números"
+            />
+            <TextField
+              sx={{ flex: '1 1 220px' }} size="small" required
+              label="Potencia (dBm) *"
+              value={formCierre.potencia_dbm}
+              onChange={(e) => cambiarCierre('potencia_dbm', e.target.value)}
+            />
+          </Box>
+
+          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+            <TextField
+              select sx={{ flex: '1 1 220px' }} size="small"
+              label="Tipo de instalación"
+              value={formCierre.tipo_instalacion}
+              onChange={(e) => cambiarCierre('tipo_instalacion', e.target.value)}
+            >
+              <MenuItem value="Residencial">Residencial</MenuItem>
+              <MenuItem value="Comercial">Comercial</MenuItem>
+            </TextField>
+            <TextField
+              sx={{ flex: '1 1 220px' }} size="small"
+              label="Conectores utilizados"
+              value={formCierre.conectores_utilizados}
+              onChange={(e) => cambiarCierre('conectores_utilizados', e.target.value.replace(/\D/g, ''))}
+            />
+          </Box>
+
+          {/* Mismo candado que en la pantalla del técnico: sin comprobante el
+              contrato queda incompleto y aquí ya no lo recoge nadie más. */}
+          {ordenCierre && !ordenCierre.foto_recibo_luz && (
+            <Box sx={{ p: 1.5, bgcolor: '#fffbeb', border: '1px solid #fde68a', borderRadius: 2 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>
+                Comprobante de domicilio *
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                Este contrato se levantó sin comprobante. Sube la foto o el PDF que te
+                haya mandado el técnico.
+              </Typography>
+              <BotonEvidencia
+                etiqueta={formCierre.foto_comprobante ? 'Comprobante Cargado' : 'Subir Comprobante'}
+                cargada={Boolean(formCierre.foto_comprobante)}
+                permitirPdf
+                color="warning"
+                fullWidth
+                onArchivo={(dataUri) => { cambiarCierre('foto_comprobante', dataUri); setErrorAsignacion(null); }}
+                onError={(mensaje) => setErrorAsignacion(mensaje)}
+              />
+            </Box>
+          )}
+
+          <TextField
+            multiline rows={3} fullWidth size="small"
+            label="Observaciones del cierre"
+            placeholder="Ej. El técnico reportó por teléfono, se usaron 5 m extra de cable"
+            value={formCierre.notas_instalacion}
+            onChange={(e) => cambiarCierre('notas_instalacion', e.target.value)}
+          />
+
+          {errorAsignacion && <Alert severity="error">{errorAsignacion}</Alert>}
+        </DialogContent>
+
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={() => setOrdenCierre(null)} disabled={cerrando} color="inherit">
+            Cancelar
+          </Button>
+          <Button
+            variant="contained" color="success"
+            startIcon={cerrando ? <CircularProgress size={16} color="inherit" /> : <AssignmentTurnedIn />}
+            onClick={handleConfirmarCierre}
+            disabled={cerrando}
+          >
+            {cerrando ? 'Completando...' : 'Completar instalación'}
           </Button>
         </DialogActions>
       </Dialog>

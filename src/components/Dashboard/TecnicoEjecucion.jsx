@@ -53,7 +53,7 @@ import BannerNavegacion from './BannerNavegacion';
 import { aPuntoNumerico, obtenerPosicionActual, motivoGpsNoDisponible } from '../../utils/geo';
 import { formatearDuracion, formatearDistancia, obtenerRuta } from '../../services/rutaService';
 import {
-  instalacionesSeguimientoService, ESTADOS, TIPOS_ALERTA
+  instalacionesSeguimientoService, ESTADOS, TIPOS_ALERTA, fichaTecnicaDesdeFormulario
 } from '../../services/instalacionesSeguimientoService';
 import { useMonitoreoTraslado } from '../../hooks/useMonitoreoTraslado';
 import { useNavegacion } from '../../hooks/useNavegacion';
@@ -559,6 +559,15 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
       if (contratoSinComprobante && !formData.foto_comprobante) {
         setError('Falta el comprobante de domicilio: ventas no lo capturó, tómale foto antes de completar');
         return;
+      }
+
+      // La ficha va primero: si falla, la instalación sigue abierta y se puede
+      // reintentar, en vez de quedar cerrada y sin los datos del equipo.
+      if (instalacionSeleccionada.instalacion_id) {
+        await instalacionesSeguimientoService.guardarFichaTecnica(
+          instalacionSeleccionada.instalacion_id,
+          fichaTecnicaDesdeFormulario(formData)
+        );
       }
 
       const cambiosContrato = { estatus: 'Completado' };

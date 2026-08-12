@@ -2,6 +2,7 @@ import api from './api';
 
 const INSTALACIONES = '/instalaciones/';
 const ALERTAS = '/alertas_instalacion/';
+const EVIDENCIAS = '/evidencias_instalacion/';
 
 export const ESTADOS = {
   PROGRAMADA: 'Programada',
@@ -22,6 +23,27 @@ export const ESTADOS_ASIGNADOS = [
   'Asignado', 'Asignada', 'Programada', 'En Proceso',
   ESTADOS.ACEPTADA, ESTADOS.EN_SITIO
 ];
+
+/**
+ * Traduce el formulario de cierre a la ficha técnica que espera el servidor.
+ *
+ * Vive aquí y no en cada pantalla porque hay dos rutas de cierre —el técnico en
+ * campo y logística capturándolo a mano— y tienen que guardar exactamente lo
+ * mismo, o los reportes saldrían distintos según quién cerró.
+ */
+export const fichaTecnicaDesdeFormulario = (form) => ({
+  verificar_equipos: Boolean(form.verificar_equipos),
+  tendido_cable: Boolean(form.tendido_cable),
+  config_ont: Boolean(form.config_ont),
+  serial_ont: (form.serial_ont || '').trim(),
+  serial_router: (form.serial_router || '').trim(),
+  metraje_fibra: form.metraje_fibra,
+  potencia_dbm: (form.potencia_dbm || '').trim(),
+  // El servidor exige tipo no vacío; el formulario arranca en Residencial.
+  tipo_instalacion: form.tipo_instalacion || 'Residencial',
+  conectores_utilizados: Number(form.conectores_utilizados) || 2,
+  notas_instalacion: (form.notas_instalacion || '').trim()
+});
 
 export const instalacionesSeguimientoService = {
   aceptar: async (instalacionId, { etaMinutos, distanciaMetros, lat, lng } = {}) => {
@@ -54,6 +76,32 @@ export const instalacionesSeguimientoService = {
       payload.ubicacion_actualizada = new Date().toISOString();
     }
     const { data } = await api.patch(`${INSTALACIONES}${instalacionId}/`, payload);
+    return data;
+  },
+
+  /**
+   * Guarda la ficha técnica del cierre (serial del ONT, potencia, metraje...).
+   *
+   * Se llama antes de marcar completada la instalación a propósito: si esto
+   * falla, la instalación sigue abierta y se puede reintentar, en vez de quedar
+   * cerrada y sin ficha.
+   *
+   * La relación con la instalación es uno a uno, así que un segundo cierre
+   * actualiza la ficha existente en vez de intentar crear otra.
+   */
+  guardarFichaTecnica: async (instalacionId, datos) => {
+    const payload = { instalacion_id: instalacionId, ...datos };
+
+    const { data: fichas } = await api.get(EVIDENCIAS);
+    const existente = (Array.isArray(fichas) ? fichas : []).find(
+      f => String(f.instalacion_id) === String(instalacionId)
+    );
+
+    if (existente) {
+      const { data } = await api.patch(`${EVIDENCIAS}${existente.id}/`, payload);
+      return data;
+    }
+    const { data } = await api.post(EVIDENCIAS, payload);
     return data;
   },
 
