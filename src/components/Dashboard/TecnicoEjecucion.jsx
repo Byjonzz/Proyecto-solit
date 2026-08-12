@@ -83,14 +83,6 @@ const Cronometro = ({ desde, etiqueta, color = '#0369a1' }) => {
   );
 };
 
-/**
- * Salida de emergencia para marcar la llegada con el GPS impreciso.
- *
- * Apagada a propósito mientras se prueba el bloqueo por distancia: así el
- * botón solo se habilita llegando de verdad al domicilio. Ponerla en true
- * vuelve a mostrar el botón "Ya estoy aquí", que deja pasar dejando registrada
- * la distancia a la que se marcó.
- */
 const PERMITIR_LLEGADA_LEJOS = false;
 
 const TecnicoEjecucion = ({ usuarioActual }) => {
@@ -130,11 +122,8 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
     activo: Boolean(enCurso) && enCurso?.estado === ESTADOS.ACEPTADA
   });
 
-  // Se evalúa una vez: no cambia durante la sesión.
   const motivoGps = useMemo(() => motivoGpsNoDisponible(), []);
 
-  // Navegación giro a giro. Solo mientras va en camino y con el mapa abierto:
-  // al llegar al domicilio ya no hay nada que indicar y seguir hablando estorba.
   const yendoAlDomicilio = rutaOpen && enCurso?.estado === ESTADOS.ACEPTADA;
   const navegacion = useNavegacion({
     origen: posicion,
@@ -143,13 +132,6 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
     voz: vozActiva
   });
 
-  /**
-   * La llegada solo se puede marcar estando en el domicilio.
-   *
-   * Cuando no hay con qué comprobarlo —GPS bloqueado, o un contrato sin
-   * coordenadas— no se bloquea: dejar a un técnico sin poder abrir su orden por
-   * un permiso del navegador es peor que confiar en él.
-   */
   const sinFormaDeValidar = Boolean(motivoGps) || !posicion || !enCurso?.destino;
   const puedeMarcarLlegada = sinFormaDeValidar || navegacion.llego;
 
@@ -355,14 +337,6 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
 
     setProcesando(true);
     try {
-      // Pedimos el GPS y calculamos la ruta ANTES de guardar la aceptación.
-      //
-      // Antes se leían de `posicion` y de la ruta que reportaba el mapa, pero
-      // ninguno de los dos existe todavía en este momento: el monitoreo solo
-      // arranca cuando la instalación ya está en estado 'Aceptada', y la ruta la
-      // calcula el mapa, que se monta después. Resultado: se guardaba sin ubicación
-      // y sin ETA, así que la oficina no veía al técnico ni la ruta, y la alerta
-      // de demora nunca podía dispararse por falta de ETA.
       const { punto, error: errorUbicacion } = await obtenerPosicionActual();
 
       let datosRuta = null;
@@ -387,8 +361,6 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
       setRutaOpen(true);
 
       if (!punto) {
-        // Se acepta igual: no vamos a bloquear el trabajo por un permiso, pero
-        // hay que decirle claro que la oficina no lo verá.
         setError(`Instalación aceptada, pero sin tu ubicación no se puede trazar la ruta ni la oficina podrá verte. ${errorUbicacion || ''}`);
       } else if (!instalacion.destino) {
         setError('Instalación aceptada. El contrato no tiene coordenadas registradas, así que no se puede trazar la ruta al domicilio.');
@@ -408,13 +380,6 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
     }
   };
 
-  /**
-   * Reintento manual del permiso de ubicación.
-   *
-   * Si el técnico negó el permiso o lo abrió sin GPS, esto le permite compartir
-   * su posición sin tener que volver a aceptar la orden. También recalcula el
-   * ETA si quedó vacío, para que la alerta de demora vuelva a funcionar.
-   */
   const handleCompartirUbicacion = async () => {
     if (!enCurso?.instalacion_id) return;
     setProcesando(true);
@@ -454,13 +419,6 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
     }
   };
 
-  /**
-   * Confirma la llegada al domicilio y arranca el cronómetro de instalación.
-   *
-   * Recibe la instalación como parámetro porque también se llama desde el diálogo
-   * de ejecución: ahí `enCurso` puede no estar puesto todavía (setState es
-   * asíncrono) y leerlo del estado daría `undefined`.
-   */
   const handleMarcarLlegada = async (instalacion = null) => {
     const objetivo = instalacion || enCurso;
     if (!objetivo?.instalacion_id) return;
@@ -468,9 +426,6 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
     setProcesando(true);
     setError('');
     try {
-      // Si el monitoreo no está activo (p. ej. se marca desde el diálogo de
-      // ejecución) pedimos una lectura del GPS para dejar constancia de dónde
-      // se registró la llegada.
       let punto = posicion;
       if (!punto) {
         const lectura = await obtenerPosicionActual();
@@ -490,15 +445,11 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
 
       setEnCurso(prev => (prev ? { ...prev, ...cambios } : { ...objetivo, ...cambios }));
 
-      // El diálogo de ejecución muestra sus propios datos: hay que refrescarlo o
-      // seguiría avisando que no se marcó la llegada.
       setInstalacionSeleccionada(prev =>
         prev && prev.instalacion_id === objetivo.instalacion_id ? { ...prev, ...cambios } : prev
       );
 
       if (!actualizada.fecha_llegada) {
-        // El backend no devolvió la marca: casi siempre es que el servidor corre
-        // una versión sin los campos de seguimiento.
         setError('Se guardó el estado, pero el servidor no registró la hora de llegada. Avisa a sistemas: el backend necesita reiniciarse para tomar los campos de seguimiento.');
       } else {
         setSuccess('Llegada registrada. El tiempo de instalación ya está corriendo.');
@@ -512,13 +463,6 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
     }
   };
 
-  /**
-   * Marca la llegada aunque el GPS lo ubique lejos del domicilio.
-   *
-   * Existe porque un GPS impreciso —un patio techado, una zona sin señal— no
-   * puede dejar varado al técnico con la orden sin abrir. Queda registrada la
-   * distancia a la que se marcó para que la oficina lo revise.
-   */
   const handleLlegadaLejos = async () => {
     if (!enCurso?.instalacion_id) return;
 
@@ -531,7 +475,6 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
         lng: posicion?.lng
       });
     } catch (err) {
-      // La constancia es deseable, pero no a costa de frenar la instalación.
       console.warn('No se pudo registrar la excepción de llegada:', err?.message);
     }
 
@@ -553,16 +496,12 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
         return;
       }
 
-      // Ventas puede levantar el contrato sin comprobante de domicilio, con el
-      // compromiso de que el técnico lo capture aquí antes de cerrar.
       const contratoSinComprobante = !instalacionSeleccionada.contrato?.foto_recibo_luz;
       if (contratoSinComprobante && !formData.foto_comprobante) {
         setError('Falta el comprobante de domicilio: ventas no lo capturó, tómale foto antes de completar');
         return;
       }
 
-      // La ficha va primero: si falla, la instalación sigue abierta y se puede
-      // reintentar, en vez de quedar cerrada y sin los datos del equipo.
       if (instalacionSeleccionada.instalacion_id) {
         await instalacionesSeguimientoService.guardarFichaTecnica(
           instalacionSeleccionada.instalacion_id,
@@ -1027,9 +966,6 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
                 <strong>Estado:</strong> {instalacionSeleccionada.estado}
               </Alert>
 
-              {/* El cronómetro de instalación arranca con la marca de llegada. Si el
-                  técnico cierra la orden sin marcarla, no queda tiempo registrado y
-                  la oficina ve "sin medición" sin poder recuperarlo después. */}
               {!vistaAdmin && !esCompletada(instalacionSeleccionada.estado) && !instalacionSeleccionada.fecha_llegada && (
                 <Alert
                   severity="warning"
@@ -1104,9 +1040,6 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
                   />
                 </Box>
 
-                {/* Aviso que dejó ventas al capturar el contrato: casi siempre
-                    es qué hay que pedirle al cliente durante la visita. Va antes
-                    del checklist para que se lea al abrir, no al cerrar. */}
                 {instalacionSeleccionada.contrato?.notas && (
                   <Alert severity="warning" sx={{ borderRadius: 2 }}>
                     <Typography variant="caption" sx={{ fontWeight: 700, display: 'block' }}>
@@ -1178,9 +1111,6 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
                       />
                     </Box>
 
-                    {/* Ventas puede levantar el contrato sin comprobante de
-                        domicilio; en ese caso el técnico lo captura aquí y es
-                        obligatorio para poder completar. */}
                     {!instalacionSeleccionada.contrato?.foto_recibo_luz && (
                       <Box sx={{ p: 1.5, bgcolor: '#fffbeb', border: '1px solid #fde68a', borderRadius: 2 }}>
                         <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
@@ -1254,8 +1184,6 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
         onClose={() => setRutaOpen(false)}
         maxWidth="md"
         fullWidth
-        // En el celular la navegación se usa a pantalla completa: el mapa a
-        // media pantalla no alcanza para ver el camino que viene.
         fullScreen={enTelefono && yendoAlDomicilio}
       >
         <DialogTitle>
@@ -1267,8 +1195,6 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
         <DialogContent dividers>
           {enCurso && (
             <Stack spacing={2}>
-              {/* Primero la instrucción del giro: es lo único que alcanza a
-                  mirar el técnico mientras maneja. */}
               {yendoAlDomicilio && posicion && (
                 <BannerNavegacion
                   maniobra={navegacion.maniobra}
@@ -1292,8 +1218,6 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
                 rutaPrecalculada={yendoAlDomicilio ? navegacion.ruta : null}
               />
 
-              {/* Contexto no seguro: Chrome bloquea el GPS sin avisar nada, así que
-                  hay que decirlo explícitamente o parece que "el GPS no funciona". */}
               {motivoGps && (
                 <Alert severity="error">
                   <strong>Tu ubicación está bloqueada.</strong> {motivoGps}
@@ -1341,9 +1265,6 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
                 </Box>
               )}
 
-              {/* Por qué está bloqueado el botón de llegada. El texto se queda
-                  aunque no haya salida de emergencia: sin él, el técnico solo
-                  vería un botón muerto y sin explicación. */}
               {enCurso.estado === ESTADOS.ACEPTADA && !puedeMarcarLlegada && (
                 <Alert
                   severity="info"
@@ -1377,8 +1298,6 @@ const TecnicoEjecucion = ({ usuarioActual }) => {
               variant="contained"
               color="secondary"
               startIcon={<Flag />}
-              // Envuelto a propósito: pasar la función directa mandaría el evento
-              // del clic como primer argumento y se tomaría por la instalación.
               onClick={() => handleMarcarLlegada()}
               disabled={procesando || !puedeMarcarLlegada}
             >

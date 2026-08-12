@@ -16,14 +16,8 @@ import NuevoProspect from '../Forms/NuevoProspect';
 import { motivoGpsNoDisponible, obtenerUbicacionGoogle } from '../../utils/geo';
 import { obtenerCobertura } from '../../services/coberturaService';
 
-// Se guarda la descarga en el módulo para que ir y venir entre pantallas no
-// repita la petición dentro de la misma sesión.
 let cachedCobertura = null;
 
-// Las cajas se agrupan por lo que dice la base de datos, no por el estado
-// operativo: verde solo para implantadas y certificadas (puestas en la calle y
-// revisadas), que son las que cuentan como cobertura. El estado que manda
-// ispcore igual se muestra en el popup, porque ahí está el detalle útil.
 const ETIQUETAS_ESTADO = {
   viable: 'Viable · con puertos libres',
   saturada: 'Saturada · sin puertos libres',
@@ -107,7 +101,7 @@ const MapaCobertura = ({ usuarioActual }) => {
   const [verCobertura, setVerCobertura] = useState(true);
   const [verSinCertificar, setVerSinCertificar] = useState(false);
   const [verNoImplantadas, setVerNoImplantadas] = useState(false);
-  const [verMiUbicacion, setVerMiUbicacion] = useState(true); // 🆕
+  const [verMiUbicacion, setVerMiUbicacion] = useState(true);
 
   const [googleCargado, setGoogleCargado] = useState(false);
   const [cargandoGoogle, setCargandoGoogle] = useState(false);
@@ -124,7 +118,7 @@ const MapaCobertura = ({ usuarioActual }) => {
 
   const [miUbicacion, setMiUbicacion] = useState(null);
   const [precisionGps, setPrecisionGps] = useState(null);
-  const [fuenteUbicacion, setFuenteUbicacion] = useState(null); // 'gps' | 'google'
+  const [fuenteUbicacion, setFuenteUbicacion] = useState(null);
   const watchIdRef = useRef(null);
   const respaldoGoogleRef = useRef(null);
   const gpsActivoRef = useRef(false);
@@ -138,11 +132,6 @@ const MapaCobertura = ({ usuarioActual }) => {
   useEffect(() => {
     let montado = true;
 
-    // Las cajas y el polígono vienen del backend, que a su vez espeja la API de
-    // ispcore: el navegador no puede llamarla directo (no manda CORS) y el
-    // origen banea ráfagas, así que la petición sale de un solo lugar y con
-    // caché. El polígono también llega armado desde allá para no unir 1633
-    // buffers dentro del celular del canvaceador.
     const cargarCobertura = async () => {
       if (cachedCobertura) {
         if (montado) {
@@ -181,9 +170,6 @@ const MapaCobertura = ({ usuarioActual }) => {
     return () => { montado = false; };
   }, []);
 
-  // El corte es el de la base de datos, no el del estado operativo: verde solo
-  // para implantadas y certificadas, que son las mismas que arman el polígono
-  // de cobertura en el backend.
   const gruposCajas = useMemo(() => {
     const grupos = { certificadas: [], sinCertificar: [], noImplantadas: [] };
     cajas.forEach(caja => {
@@ -197,10 +183,6 @@ const MapaCobertura = ({ usuarioActual }) => {
   useEffect(() => {
     let montado = true;
 
-    // Respaldo con la Geolocation API de Google: entra cuando el GPS del
-    // navegador no puede usarse (contexto http, permiso negado, sin GPS) y se
-    // refresca cada minuto mientras el GPS siga sin responder. En cuanto el
-    // GPS da una lectura, el respaldo se apaga y ya no vuelve a pisarla.
     const consultarRespaldoGoogle = async () => {
       if (gpsActivoRef.current) return;
       const { punto, error } = await obtenerUbicacionGoogle();
@@ -648,7 +630,6 @@ const MapaCobertura = ({ usuarioActual }) => {
 
             {verMiUbicacion && miUbicacion && (
               <>
-                {/* Con error de decenas de km el círculo tapa el mapa entero; el chip ya avisa la precisión */}
                 {precisionGps && precisionGps < 15000 && (
                   <Circle
                     center={miUbicacion}

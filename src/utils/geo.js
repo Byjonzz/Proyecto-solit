@@ -34,14 +34,6 @@ export const aPuntoNumerico = (valor) => {
   return { lat: nLat, lng: nLng };
 };
 
-/**
- * Motivo por el que el navegador no puede dar la ubicación, o null si sí puede.
- *
- * El caso que más confunde es el contexto no seguro: si la app se abre por
- * http:// desde una IP de la red local (típico al probar en el celular), Chrome
- * bloquea la geolocalización sin preguntar nada, así que "no funciona el GPS"
- * sin ningún error visible.
- */
 export const motivoGpsNoDisponible = () => {
   if (!('geolocation' in navigator)) {
     return 'Este navegador no soporta geolocalización.';
@@ -53,17 +45,6 @@ export const motivoGpsNoDisponible = () => {
   return null;
 };
 
-/**
- * Ubicación estimada con la Geolocation API de Google (señales de red / IP).
- *
- * Es el respaldo para cuando el GPS del navegador no puede usarse (contexto
- * http, permiso negado, equipo sin GPS): no requiere permiso del usuario ni
- * contexto seguro, a cambio de menor precisión. El radio real de error viene
- * en `precision` (metros), igual que en obtenerPosicionActual.
- *
- * Ojo: la clave debe permitir la Geolocation API; las claves restringidas por
- * "referentes HTTP" son rechazadas por esta API (el error llega en `error`).
- */
 export const obtenerUbicacionGoogle = async () => {
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
   if (!apiKey) {
@@ -94,10 +75,6 @@ export const obtenerUbicacionGoogle = async () => {
   }
 };
 
-/**
- * Una sola lectura del GPS, como promesa. Resuelve `{punto, error}` en vez de
- * rechazar, para que quien la use no tenga que envolverla en try/catch.
- */
 export const obtenerPosicionActual = ({ timeout = 15000, maximumAge = 30000 } = {}) => {
   const motivo = motivoGpsNoDisponible();
   if (motivo) return Promise.resolve({ punto: null, error: motivo });

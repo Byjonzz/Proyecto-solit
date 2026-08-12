@@ -3,13 +3,6 @@ import { categoriasCatalogoService, AMBITOS } from '../services/categoriasCatalo
 
 const MS_REFRESCO = 30000;
 
-/**
- * Catálogo de pestañas de un ámbito ('internet' o 'chip').
- *
- * Se refresca sola cuando administración guarda un cambio (evento
- * 'planesUpdated') y además cada 30 s, para que un cambio hecho desde otra
- * computadora aparezca sin recargar.
- */
 export const useCategorias = (ambito = AMBITOS.INTERNET) => {
   const [categorias, setCategorias] = useState([]);
   const [loading, setLoading] = useState(true);

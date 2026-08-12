@@ -18,20 +18,12 @@ import {
   rangoLegible, dentroDeLaSemana
 } from '../../utils/semana';
 
-/**
- * Valores de arranque del esquema.
- *
- * La meta se guarda por técnico en `Usuario.insta_semanal` al pulsar Guardar,
- * así que a partir del primer guardado manda lo que haya en la base. El monto
- * vive en la pantalla, igual que las reglas de metas de Comisiones.
- */
 const META_SEMANAL_POR_DEFECTO = 10;
 const MONTO_POR_EXCEDENTE_POR_DEFECTO = 150;
 
 const dinero = (n) =>
   `$${(Number(n) || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-/** Las llaves foráneas llegan como número, texto u objeto según el endpoint. */
 const idDeCampo = (valor) => {
   if (valor == null) return null;
   const n = Number(typeof valor === 'object' ? valor.id : valor);
@@ -52,7 +44,6 @@ const BonoProactividad = () => {
   const [metaSemanal, setMetaSemanal] = useState(META_SEMANAL_POR_DEFECTO);
   const [montoPorExcedente, setMontoPorExcedente] = useState(MONTO_POR_EXCEDENTE_POR_DEFECTO);
 
-  // Arranca en la semana en curso.
   const [semana, setSemana] = useState(() => lunesDeLaSemana(new Date()));
   const [detalle, setDetalle] = useState(null);
 
@@ -76,8 +67,6 @@ const BonoProactividad = () => {
       setInstalaciones(resInstalaciones.data || []);
       setBonos(resBonos.data || []);
 
-      // La meta guardada es la del equipo: se toma la del primer técnico que
-      // tenga una puesta, porque el esquema es uno solo para todos.
       const conMeta = lista.find((t) => Number(t.insta_semanal) > 0);
       if (conMeta) setMetaSemanal(Number(conMeta.insta_semanal));
     } catch (err) {
@@ -89,13 +78,6 @@ const BonoProactividad = () => {
 
   const claveSemana = claveSemanaISO(semana);
 
-  /**
-   * Instalaciones que cuentan y bono que sale de ellas.
-   *
-   * Solo entran las que el técnico dejó **completadas** dentro de la semana. Una
-   * orden aceptada o en sitio no cuenta por más avanzada que vaya: el bono es
-   * por trabajo terminado.
-   */
   const calculo = useMemo(() => {
     return tecnicos
       .map((tecnico) => {
@@ -141,8 +123,6 @@ const BonoProactividad = () => {
     setError('');
     setAviso('');
     try {
-      // La meta es del equipo, así que se copia a todos los técnicos. El campo
-      // `insta_semanal` ya existía en el modelo y no lo usaba nadie.
       await Promise.all(
         tecnicos.map((t) => api.patch(`/usuarios/${t.id}/`, { insta_semanal: Number(metaSemanal) }))
       );
@@ -205,7 +185,6 @@ const BonoProactividad = () => {
       {aviso && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setAviso('')}>{aviso}</Alert>}
 
       <Grid container spacing={3}>
-        {/* ===== Esquema del bono ===== */}
         <Grid size={{ xs: 12, md: 4 }}>
           <Card variant="outlined" sx={{ borderRadius: 3, height: '100%' }}>
             <CardContent>
@@ -251,7 +230,6 @@ const BonoProactividad = () => {
           </Card>
         </Grid>
 
-        {/* ===== Semana y resultados ===== */}
         <Grid size={{ xs: 12, md: 8 }}>
           <Card variant="outlined" sx={{ borderRadius: 3, height: '100%' }}>
             <CardContent>
@@ -389,7 +367,6 @@ const BonoProactividad = () => {
         </Grid>
       </Grid>
 
-      {/* ===== Instalaciones que sustentan el bono ===== */}
       <Dialog open={Boolean(detalle)} onClose={() => setDetalle(null)} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ fontWeight: 700 }}>
           {detalle?.nombre}

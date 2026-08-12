@@ -23,9 +23,6 @@ export const RUTAS_POR_ROL = {
   ],
   
   
-  // Ojo: el primero de la lista es la pantalla con la que arranca el rol al
-  // iniciar sesión (ver obtenerPrimeraRuta). Para el técnico eso es su trabajo
-  // del día, no el alta de contratos.
   [ROLES.TECNICO]: [
     'tecnico-ejecucion',
     'tecnico-mis-instalaciones',
@@ -85,12 +82,6 @@ export const puedeAccederARuta = (rolUsuario, ruta) => {
 };
 
 
-/**
- * Pantalla con la que arranca cada rol al iniciar sesión.
- *
- * Es la primera de RUTAS_POR_ROL, así que ese orden no es decorativo: mover un
- * elemento al principio cambia dónde cae la gente al entrar.
- */
 export const obtenerPrimeraRuta = (rolUsuario) => {
   const rolNormalizado = rolUsuario.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
   const rutasPermitidas = RUTAS_POR_ROL[rolNormalizado] || [];

@@ -4,17 +4,6 @@ import { PhotoCamera, UploadFile, AddPhotoAlternate } from '@mui/icons-material'
 
 import { procesarArchivoEvidencia } from '../../utils/evidencias';
 
-/**
- * Botón de captura de evidencia con dos formas de subirla.
- *
- * Al tocarlo pregunta si el usuario quiere tomar la foto o elegir un archivo ya
- * digitalizado (por ejemplo el recibo en PDF que el cliente descarga de CFE).
- * Ambas terminan en el mismo campo, así que no hace falta una columna aparte.
- *
- * Se usan dos <input type="file"> distintos a propósito: el atributo `capture`
- * no se puede alternar de forma confiable en el mismo input entre navegadores,
- * así que uno abre la cámara y el otro el explorador de archivos.
- */
 const BotonEvidencia = ({
   etiqueta,
   cargada = false,
@@ -29,7 +18,6 @@ const BotonEvidencia = ({
   const inputCamaraRef = useRef(null);
   const inputArchivoRef = useRef(null);
 
-  // Sin PDF permitido el botón no tiene por qué preguntar nada: abre la cámara.
   const abrir = (e) => {
     if (!permitirPdf) {
       inputCamaraRef.current?.click();
@@ -45,7 +33,6 @@ const BotonEvidencia = ({
 
   const handleArchivo = async (e) => {
     const file = e.target.files?.[0];
-    // Se limpia siempre para poder reelegir el mismo archivo si se equivocó.
     e.target.value = '';
     if (!file) return;
 

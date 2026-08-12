@@ -23,7 +23,6 @@ const ICONOS = {
   destino: Flag
 };
 
-/** La distancia al giro es lo que se lee de reojo: va en grande y redondeada. */
 const distanciaCorta = (metros) => {
   if (metros == null) return '';
   if (metros < 20) return 'Ahora';
@@ -31,12 +30,6 @@ const distanciaCorta = (metros) => {
   return `${(metros / 1000).toFixed(1)} km`;
 };
 
-/**
- * Barra de instrucción giro a giro, al estilo de las apps de navegación.
- *
- * Se dibuja sobre el mapa y es lo único que el técnico alcanza a mirar mientras
- * maneja, así que la maniobra va en grande y el resto en chico.
- */
 const BannerNavegacion = ({
   maniobra,
   distanciaM,

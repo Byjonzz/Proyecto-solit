@@ -28,14 +28,8 @@ import {
 import { MapContainer, TileLayer, CircleMarker, useMap, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 
-// Grosor del trazo de la firma, en píxeles tal como se ven en pantalla. Al
-// dibujar se multiplica por la escala del canvas, así que el trazo se ve igual
-// de grueso en celular que en escritorio.
 const GROSOR_FIRMA_PX = 1.6;
 
-// Nota de un clic para el caso más común: el cliente no traía el comprobante.
-// Se ofrece hecha para que la nota llegue a logística redactada igual siempre y
-// el vendedor no la deje en blanco por pereza.
 const NOTA_SIN_COMPROBANTE =
   'El cliente no tenía el comprobante de domicilio a la mano: pedírselo el día de la instalación.';
 
@@ -55,8 +49,6 @@ const ClicEnMapa = ({ alHacerClic }) => {
   return null;
 };
 
-// Dentro de un <Dialog/> o de un <Collapse/> del Stepper, Leaflet mide el
-// contenedor cuando todavía tiene 0px de alto y las teselas salen grises.
 const AjustarTamanoMapa = () => {
   const map = useMap();
   useEffect(() => {
@@ -75,8 +67,6 @@ const PlanCotizacion = ({
   const { createContrato, loading: loadingContrato } = useContratos();
 
   
-  // Todos los planes activos, sin importar de qué pestaña sean: aquí solo se
-  // usan para reencontrar por nombre el plan que traía el prospecto.
   const { todosLosPlanes } = usePlanes();
 
   const [activeStep, setActiveStep] = useState(0);
@@ -86,11 +76,8 @@ const PlanCotizacion = ({
   const [errorApi, setErrorApi] = useState(null);
   const [activarChip, setActivarChip] = useState(false);
 
-  // Errores por campo del paso en curso.
   const [erroresPaso, setErroresPaso] = useState({});
-  // Falla del servicio de mapas al traducir coordenadas.
   const [errorGeocode, setErrorGeocode] = useState(null);
-  // Resumen + confirmación antes de guardar.
   const [confirmacionAbierta, setConfirmacionAbierta] = useState(false);
 
   const [formData, setFormData] = useState({
@@ -121,9 +108,6 @@ const PlanCotizacion = ({
 
   const canvasRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
-  // La firma vive en el bitmap del canvas y el canvas se desmonta al cambiar
-  // de paso; se conserva aquí como imagen para restaurarla si el vendedor
-  // regresa, en vez de obligar al cliente a firmar otra vez.
   const [firmaGuardada, setFirmaGuardada] = useState(null);
 
   const datosPrefill = datosDesdeProspecto || location.state?.datosDesdeProspecto || null;
@@ -169,20 +153,9 @@ const PlanCotizacion = ({
     }
   }, [planInteresPendiente, todosLosPlanes]);
 
-  /**
-   * Convierte la posición del puntero a coordenadas internas del canvas.
-   *
-   * El canvas tiene un mapa de bits fijo de 800x200 pero se muestra al 100% del
-   * ancho del contenedor (unos 430 px). Sin reescalar, una firma hecha al centro
-   * de la pantalla se dibujaba a ~27% del ancho interno, es decir pegada a la
-   * izquierda. Hay que multiplicar por la razón entre el tamaño interno y el
-   * mostrado.
-   */
   const obtenerPuntoCanvas = (e, canvas) => {
     const rect = canvas.getBoundingClientRect();
 
-    // En touch, clientX vive en e.touches; se revisa primero porque un toque en
-    // el borde izquierdo da clientX = 0, que con `||` se tomaría como ausente.
     const fuente = e.touches?.[0] || e.changedTouches?.[0] || e;
     const escalaX = canvas.width / rect.width;
     const escalaY = canvas.height / rect.height;
@@ -200,8 +173,6 @@ const PlanCotizacion = ({
     const ctx = canvas.getContext('2d');
     const { x, y, escalaX } = obtenerPuntoCanvas(e, canvas);
 
-    // El grosor también se escala para que el trazo se vea de ~3 px en pantalla
-    // sin importar el ancho al que se esté mostrando el canvas.
     ctx.lineWidth = GROSOR_FIRMA_PX * escalaX;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
@@ -226,7 +197,6 @@ const PlanCotizacion = ({
   const stopDrawing = () => {
     if (!isDrawing) return;
     setIsDrawing(false);
-    // Cada vez que levanta el lápiz se respalda el trazo acumulado.
     const canvas = canvasRef.current;
     if (canvas) setFirmaGuardada(canvas.toDataURL());
   };
@@ -239,8 +209,6 @@ const PlanCotizacion = ({
     ctx.clearRect(0, 0, canvas.width, canvas.height);
   };
 
-  // Al volver al paso de evidencias el canvas se monta en blanco: se restaura
-  // el último trazo respaldado.
   useEffect(() => {
     if (activeStep !== 2 || !firmaGuardada) return;
     const canvas = canvasRef.current;
@@ -252,22 +220,13 @@ const PlanCotizacion = ({
       ctx.drawImage(img, 0, 0);
     };
     img.src = firmaGuardada;
-    // Solo al entrar al paso: redibujar en cada trazo pisaría la firma en curso.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeStep]);
 
-  /**
-   * Traduce las coordenadas a una dirección.
-   *
-   * Si el servicio de mapas falla se avisa en pantalla en vez de dejar el campo
-   * vacío: antes, al guardar, la dirección terminaba siendo "Ubicación por
-   * mapa: 18.46, -97.39" y parecía que la traducción no existía.
-   */
   const consultarDireccionHumana = async (latitude, longitude) => {
     setLoadingGeocode(true);
     setErrorGeocode(null);
 
-    // Las coordenadas se guardan aunque falle la traducción: son el dato duro.
     setFormData(prev => ({
       ...prev,
       lat: latitude.toString(),
@@ -328,13 +287,6 @@ const PlanCotizacion = ({
     setErrorPlan(false);
   };
 
-  /**
-   * Valida un paso y deja los mensajes junto a cada campo.
-   *
-   * Antes toda la validación vivía en handleSubmit: el vendedor llenaba los tres
-   * pasos, subía cuatro fotos, tomaba la firma del cliente y hasta entonces se
-   * enteraba de que el INE estaba mal. Ahora cada paso se valida al salir de él.
-   */
   const validarPasoContrato = (paso) => {
     let errores = {};
 
@@ -347,11 +299,8 @@ const PlanCotizacion = ({
       if (e2) errores.nombre = e2;
       if (e3) errores.telefono1 = e3;
       if (e4) errores.telefono2 = e4;
-      // El correo es obligatorio pero sin validar su formato: hay clientes
-      // con correos poco comunes que el filtro anterior marcaba como falsos.
       if (!formData.correo.trim()) errores.correo = 'El correo es obligatorio';
 
-      // Dos teléfonos iguales suele ser copiar y pegar por salir del paso.
       if (!e3 && !e4 && formData.telefono2 && formData.telefono1 === formData.telefono2) {
         errores.telefono2 = 'El teléfono 2 no puede ser igual al teléfono 1';
       }
@@ -378,8 +327,6 @@ const PlanCotizacion = ({
     }
 
     if (paso === 2) {
-      // El comprobante de domicilio no es obligatorio aquí: si el cliente no
-      // lo tiene a la mano, el técnico lo captura durante la instalación.
       if (!fotoFrenteINE) errores.evidencias = 'Falta la foto del frente del INE';
       else if (!fotoReversoINE) errores.evidencias = 'Falta la foto del reverso del INE';
       else if (!fotoFachada) errores.evidencias = 'Falta la foto de la fachada';
@@ -401,15 +348,12 @@ const PlanCotizacion = ({
     return mensajes.length === 0;
   };
 
-  /** True si no hay firma ni en el canvas ni en el respaldo. */
   const firmaEstaVacia = () => {
     const canvas = canvasRef.current;
     if (!canvas) return !firmaGuardada;
     const ctx = canvas.getContext('2d');
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const canvasVacio = !imageData.data.some(channel => channel !== 0);
-    // El canvas puede estar recién montado y todavía sin restaurar; el
-    // respaldo también cuenta como firma válida.
     return canvasVacio && !firmaGuardada;
   };
 
@@ -469,7 +413,6 @@ const PlanCotizacion = ({
     }
   };
 
-  /** Agrega la nota estándar del comprobante sin pisar lo que ya se escribió. */
   const agregarNotaComprobante = () => {
     setFormData(prev => {
       const actual = (prev.notas || '').trim();
@@ -481,19 +424,12 @@ const PlanCotizacion = ({
     });
   };
 
-  /**
-   * Último paso: en vez de guardar, revalida todo y abre el resumen.
-   *
-   * Se revalidan también los pasos anteriores porque el vendedor pudo regresar y
-   * dejar un campo a medias después de haberlo pasado.
-   */
   const handleSubmit = (e) => {
     if (e?.preventDefault) e.preventDefault();
     setErrorApi(null);
 
     for (const paso of [0, 1, 2]) {
       if (!validarPasoContrato(paso)) {
-        // Devolvemos al vendedor al paso donde está el problema.
         setActiveStep(paso);
         return;
       }
@@ -502,7 +438,6 @@ const PlanCotizacion = ({
     setConfirmacionAbierta(true);
   };
 
-  /** Guarda el contrato. Solo se llama desde el diálogo de confirmación. */
   const guardarContrato = async () => {
     setErrorApi(null);
     setConfirmacionAbierta(false);
@@ -511,8 +446,6 @@ const PlanCotizacion = ({
     setGuardado(true);
 
     try {
-      // El canvas es la fuente primaria; si por un cambio de paso aún no se
-      // restaura el trazo, se usa el respaldo.
       let firmaDigital = firmaGuardada;
       if (canvas) {
         const ctx = canvas.getContext('2d');
@@ -739,12 +672,10 @@ const PlanCotizacion = ({
               </RadioGroup>
             </FormControl>
             <Box sx={{ p: 2, backgroundColor: '#f8fafc', borderRadius: 2, border: '1px solid #e2e8f0' }}>
-              {/* Falta capturar el GPS o el pin: el aviso va aquí, no al final */}
               {erroresPaso.direccion && metodoUbicacion !== 'manual' && (
                 <Alert severity="error" sx={{ mb: 2 }}>{erroresPaso.direccion}</Alert>
               )}
 
-              {/* El punto se capturó pero Google no devolvió la calle */}
               {errorGeocode && !loadingGeocode && (
                 <Alert
                   severity="warning"
@@ -951,9 +882,6 @@ const PlanCotizacion = ({
               Evidencias del Domicilio
             </Typography>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 1 }}>
-              {/* El comprobante de domicilio suele venir ya digitalizado (el PDF
-                  que el cliente descarga de CFE), así que este botón pregunta si
-                  se toma foto o se sube el archivo. Va al mismo campo. */}
               <BotonEvidencia
                 etiqueta={fotoReciboLuz ? 'Comprobante Cargado' : 'Comprobante de Domicilio (opcional)'}
                 cargada={Boolean(fotoReciboLuz)}
@@ -1001,9 +929,6 @@ const PlanCotizacion = ({
               </Box>
             )}
 
-            {/* Notas de ventas. El caso que originó el campo es el comprobante:
-                si no se capturó, logística lo ve en su agenda y el técnico sabe
-                que tiene que pedirlo el día de la instalación. */}
             <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
               Notas para logística y el técnico
             </Typography>
@@ -1167,9 +1092,6 @@ const PlanCotizacion = ({
               <StepContent>
                 {renderStepContent(index)}
                 <Box sx={{ mt: 3 }}>
-                  {/* Atrás va primero: retroceder a la izquierda y avanzar a la
-                      derecha es como se lee el resto del sistema y como esperan
-                      los steppers en general. */}
                   <Button disabled={index === 0} onClick={handleBack} sx={{ mr: 1 }}>Atrás</Button>
                   <Button
                     variant="contained"
@@ -1197,7 +1119,6 @@ const PlanCotizacion = ({
         )}
       </Paper>
 
-      {/* Resumen y confirmación antes de guardar el contrato */}
       <Dialog
         open={confirmacionAbierta}
         onClose={() => !loadingContrato && setConfirmacionAbierta(false)}
@@ -1264,7 +1185,6 @@ const PlanCotizacion = ({
             )}
           </List>
 
-          {/* El total es lo que más importa revisar en voz alta con el cliente */}
           <Box sx={{ mt: 2, p: 2, bgcolor: '#ecfdf5', borderRadius: 2, border: '1px solid #a7f3d0' }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
               <Typography variant="body2">Primer mes:</Typography>

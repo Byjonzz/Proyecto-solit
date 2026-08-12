@@ -14,8 +14,6 @@ export const ESTADOS = {
 export const TIPOS_ALERTA = {
   INACTIVIDAD: 'inactividad',
   DEMORA: 'demora',
-  // El técnico marcó llegada estando lejos del domicilio, saltándose el bloqueo
-  // del botón. Debe coincidir con AlertaInstalacion.TIPOS del backend.
   LLEGADA_LEJOS: 'llegada_lejos'
 };
 
@@ -24,13 +22,6 @@ export const ESTADOS_ASIGNADOS = [
   ESTADOS.ACEPTADA, ESTADOS.EN_SITIO
 ];
 
-/**
- * Traduce el formulario de cierre a la ficha técnica que espera el servidor.
- *
- * Vive aquí y no en cada pantalla porque hay dos rutas de cierre —el técnico en
- * campo y logística capturándolo a mano— y tienen que guardar exactamente lo
- * mismo, o los reportes saldrían distintos según quién cerró.
- */
 export const fichaTecnicaDesdeFormulario = (form) => ({
   verificar_equipos: Boolean(form.verificar_equipos),
   tendido_cable: Boolean(form.tendido_cable),
@@ -39,7 +30,6 @@ export const fichaTecnicaDesdeFormulario = (form) => ({
   serial_router: (form.serial_router || '').trim(),
   metraje_fibra: form.metraje_fibra,
   potencia_dbm: (form.potencia_dbm || '').trim(),
-  // El servidor exige tipo no vacío; el formulario arranca en Residencial.
   tipo_instalacion: form.tipo_instalacion || 'Residencial',
   conectores_utilizados: Number(form.conectores_utilizados) || 2,
   notas_instalacion: (form.notas_instalacion || '').trim()
@@ -79,16 +69,6 @@ export const instalacionesSeguimientoService = {
     return data;
   },
 
-  /**
-   * Guarda la ficha técnica del cierre (serial del ONT, potencia, metraje...).
-   *
-   * Se llama antes de marcar completada la instalación a propósito: si esto
-   * falla, la instalación sigue abierta y se puede reintentar, en vez de quedar
-   * cerrada y sin ficha.
-   *
-   * La relación con la instalación es uno a uno, así que un segundo cierre
-   * actualiza la ficha existente en vez de intentar crear otra.
-   */
   guardarFichaTecnica: async (instalacionId, datos) => {
     const payload = { instalacion_id: instalacionId, ...datos };
 

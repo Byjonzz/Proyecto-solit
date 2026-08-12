@@ -29,14 +29,8 @@ import { esPdf } from '../../utils/evidencias';
 
 const MS_REFRESCO_SEGUIMIENTO = 2000;
 
-// Quién puede cerrar una instalación desde el backoffice, tecleando los datos
-// que el técnico reporta por fuera. El técnico cierra desde su propia pantalla,
-// en campo; esto es el respaldo para cuando no lo hizo ahí.
 const ROLES_CIERRE_MANUAL = ['logistica', 'admin'];
 
-// Mismo normalizado que usa config/roles.js, para que un rol guardado como
-// "Logística" con acento no se quede fuera. La clase se arma desde string para
-// no dejar caracteres combinantes sueltos en el código fuente.
 const ACENTOS_COMBINANTES = new RegExp('[\\u0300-\\u036f]', 'g');
 const normalizarRol = (rol) => String(rol || '')
   .toLowerCase().normalize('NFD').replace(ACENTOS_COMBINANTES, '').trim();
@@ -186,8 +180,6 @@ const AgendaInstalaciones = ({ usuarioActual }) => {
       .map(m => m.etiqueta);
     if (motivoLibre.trim()) textos.push(motivoLibre.trim());
 
-    // Vale con marcar una casilla o con escribir el motivo: lo que no vale es
-    // devolver el contrato sin decir qué corregir.
     if (textos.length === 0) {
       setErrorAsignacion('Marca un motivo o escribe por qué lo regresas: es lo único que verá el canvaceador.');
       return;
@@ -233,8 +225,6 @@ const AgendaInstalaciones = ({ usuarioActual }) => {
       .map(m => m.etiqueta);
     if (motivoCancelacionLibre.trim()) textos.push(motivoCancelacionLibre.trim());
 
-    // Vale con marcar una casilla o con escribirlo. Lo que no vale es cancelar
-    // sin motivo: dentro de tres meses nadie sabría por qué se cayó esta venta.
     if (textos.length === 0) {
       setErrorAsignacion('Marca un motivo o escribe por qué se cayó: es lo único que queda del contrato como registro.');
       return;
@@ -269,14 +259,11 @@ const AgendaInstalaciones = ({ usuarioActual }) => {
   const handleConfirmarCierre = async () => {
     if (!ordenCierre) return;
 
-    // Los mismos tres obligatorios que le pide la app al técnico: si aquí se
-    // pidieran menos, el reporte saldría distinto según quién cerró.
     if (!formCierre.serial_ont.trim() || !formCierre.potencia_dbm.trim() || !String(formCierre.metraje_fibra).trim()) {
       setErrorAsignacion('Serial del ONT, potencia y metraje de fibra son obligatorios para cerrar.');
       return;
     }
 
-    // Mismo candado del comprobante que en la pantalla del técnico.
     if (!ordenCierre.foto_recibo_luz && !formCierre.foto_comprobante) {
       setErrorAsignacion('Falta el comprobante de domicilio: súbelo antes de cerrar la instalación.');
       return;
@@ -290,8 +277,6 @@ const AgendaInstalaciones = ({ usuarioActual }) => {
     setCerrando(true);
     setErrorAsignacion(null);
     try {
-      // La ficha primero: si falla, la instalación sigue abierta y se reintenta,
-      // en vez de quedar cerrada y sin los datos del equipo.
       await instalacionesSeguimientoService.guardarFichaTecnica(
         ordenCierre.instalacion_id,
         fichaTecnicaDesdeFormulario(formCierre)
@@ -384,8 +369,6 @@ const AgendaInstalaciones = ({ usuarioActual }) => {
       hour: '2-digit',
       minute: '2-digit',
       hour12: true,
-      // La operación es en México: fija la zona para que la hora no dependa
-      // del reloj de la computadora desde donde se consulte.
       timeZone: 'America/Mexico_City'
     });
   };
@@ -498,7 +481,6 @@ const AgendaInstalaciones = ({ usuarioActual }) => {
     }
   });
 
-  // Columnas visibles según el filtro; la usan los colSpan de la tabla.
   const totalColumnas = filtroEstatus === 'completadas' ? 9 : filtroEstatus === 'asignadas' ? 8 : 7;
 
   const ordenSeguimiento = seguimientoOrden
@@ -641,8 +623,6 @@ const AgendaInstalaciones = ({ usuarioActual }) => {
         correo: datosEditar.correo,
         calle_numero: datosEditar.calle_numero,
         plan_contratado: datosEditar.plan_contratado,
-        // El contrato guarda la nota siempre; la instalación es solo una copia
-        // para el técnico y puede no existir todavía.
         nota_logistica: datosEditar.nota
       };
 
@@ -674,8 +654,6 @@ const AgendaInstalaciones = ({ usuarioActual }) => {
     setGuardandoNotas(true);
 
     try {
-      // La nota va siempre al contrato: si todavía no hay instalación (contrato
-      // pendiente de agendar), es el único lugar donde puede vivir.
       await api.patch(`/contratos/${ordenSeleccionada.contrato_id}/`, {
         nota_logistica: notaInstalacion
       });
@@ -793,8 +771,6 @@ const AgendaInstalaciones = ({ usuarioActual }) => {
       await api.patch(`/contratos/${ordenSeleccionada.contrato_id}/`, {
         estatus: 'Asignado',
         tecnico_id: tecnico,
-        // Va en el mismo PATCH que ya se hacía: mantiene la copia del contrato
-        // al día para que no se separe de la de la instalación.
         nota_logistica: notaInstalacion
       });
 
@@ -959,8 +935,6 @@ const AgendaInstalaciones = ({ usuarioActual }) => {
             ) : (
               ordenesFiltradas.map((orden) => (
                 <React.Fragment key={orden.id}>
-                {/* Con nota de ventas abajo, esta fila pierde su borde inferior
-                    para que las dos se lean como un solo renglón. */}
                 <TableRow
                   hover
                   sx={orden.notas_contrato ? { '& > td': { borderBottom: 'none' } } : undefined}
@@ -1114,10 +1088,6 @@ const AgendaInstalaciones = ({ usuarioActual }) => {
                           Rechazar
                         </Button>
 
-                        {/* Gris y no rojo a propósito: cancelar no es un error
-                            del canvaceador como el rechazo, es una venta que se
-                            cayó. Y no vuelve: de aquí el contrato solo queda
-                            archivado. */}
                         <Tooltip title="La venta se cayó: archiva el contrato como registro">
                           <Button
                             variant="outlined" size="small" startIcon={<Block />}
@@ -1190,8 +1160,6 @@ const AgendaInstalaciones = ({ usuarioActual }) => {
                           Notas
                         </Button>
 
-                        {/* Cierre desde el backoffice, solo para logística y
-                            admin: el técnico cierra desde su propia pantalla. */}
                         {puedeCerrarManual && (
                           <Tooltip title="Cerrar la instalación capturando los datos del técnico a mano">
                             <Button
@@ -1545,8 +1513,6 @@ const AgendaInstalaciones = ({ usuarioActual }) => {
         </DialogTitle>
         
         <DialogContent dividers sx={{ display: 'flex', flexDirection: 'column', gap: 3, py: 3, maxHeight: 700, overflow: 'auto' }}>
-          {/* Lo que avisó ventas al capturar. Aquí no se edita: es el recado de
-              quien vendió, no un campo de logística. */}
           {ordenSeleccionada?.notas_contrato && (
             <Alert severity="warning" icon={<CommentOutlined />} sx={{ borderRadius: 2 }}>
               <Typography variant="caption" sx={{ fontWeight: 700, display: 'block' }}>
@@ -1741,8 +1707,6 @@ const AgendaInstalaciones = ({ usuarioActual }) => {
             ))}
           </Stack>
 
-          {/* Sin casillas marcadas este campo es el único motivo que le llega al
-              canvaceador, así que ahí deja de ser opcional. */}
           <TextField
             label={motivosMarcados.length === 0 ? 'Motivo del rechazo *' : 'Detalle adicional (opcional)'}
             placeholder="Ej. El recibo es de otro domicilio"
@@ -1760,8 +1724,6 @@ const AgendaInstalaciones = ({ usuarioActual }) => {
             y solo podrá reemplazar las fotos.
           </Alert>
 
-          {/* El error de la página se dibuja detrás del diálogo, así que aquí
-              hace falta su propia copia o el usuario no ve por qué falló. */}
           {errorAsignacion && <Alert severity="error" sx={{ mt: 2 }}>{errorAsignacion}</Alert>}
         </DialogContent>
 
@@ -1829,8 +1791,6 @@ const AgendaInstalaciones = ({ usuarioActual }) => {
             ))}
           </Stack>
 
-          {/* Sin casillas marcadas este texto es el único registro que queda de
-              por qué se cayó la venta, así que ahí deja de ser opcional. */}
           <TextField
             label={motivosCancelacion.length === 0 ? 'Motivo de la cancelación *' : 'Detalle adicional (opcional)'}
             placeholder="Ej. Dijo que lo vuelve a solicitar el próximo mes"
@@ -1849,7 +1809,6 @@ const AgendaInstalaciones = ({ usuarioActual }) => {
             solo lectura: no podrá editarlo ni reenviarlo.
           </Alert>
 
-          {/* El error de la página queda detrás del diálogo; aquí va su copia. */}
           {errorAsignacion && <Alert severity="error" sx={{ mt: 2 }}>{errorAsignacion}</Alert>}
         </DialogContent>
 
@@ -1961,8 +1920,6 @@ const AgendaInstalaciones = ({ usuarioActual }) => {
             />
           </Box>
 
-          {/* Mismo candado que en la pantalla del técnico: sin comprobante el
-              contrato queda incompleto y aquí ya no lo recoge nadie más. */}
           {ordenCierre && !ordenCierre.foto_recibo_luz && (
             <Box sx={{ p: 1.5, bgcolor: '#fffbeb', border: '1px solid #fde68a', borderRadius: 2 }}>
               <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>
@@ -2073,9 +2030,6 @@ const AgendaInstalaciones = ({ usuarioActual }) => {
                   etaMinutos: ordenSeguimiento.eta_minutos
                 }}
                 mensajeSinOrigen={
-                  // Aceptó pero no reporta: casi siempre es permiso de ubicación
-                  // negado o la app cerrada. Decirlo evita que la oficina crea
-                  // que el sistema falla.
                   (ordenSeguimiento.estatus === ESTADOS.ACEPTADA || ordenSeguimiento.estatus === ESTADOS.EN_SITIO)
                     ? 'El técnico aceptó la orden pero no está compartiendo su ubicación. Suele ser porque negó el permiso de GPS o cerró la app. Pídele que abra la instalación y toque "Compartir ahora".'
                     : null
@@ -2083,7 +2037,6 @@ const AgendaInstalaciones = ({ usuarioActual }) => {
                 alturaMapa={320}
               />
 
-              {/* Historial de alertas de monitoreo */}
               <Box>
                 <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
                   <NotificationsActive fontSize="small" color="warning" />

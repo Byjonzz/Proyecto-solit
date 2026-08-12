@@ -41,7 +41,6 @@ const iconoTecnico = L.divIcon({
   iconAnchor: [11, 11]
 });
 
-/** Flecha del técnico en modo navegación; siempre apunta hacia adelante. */
 const iconoNavegando = L.divIcon({
   className: 'wrapper-tecnico',
   html: `
@@ -58,25 +57,10 @@ const iconoNavegando = L.divIcon({
 
 const modulo = (n, m) => ((n % m) + m) % m;
 
-/** Diferencia con signo entre dos ángulos, siempre por el lado corto. */
 const diferenciaAngular = (desde, hasta) => modulo(hasta - desde + 180, 360) - 180;
 
-/** Cada cuánto se acerca el giro a su objetivo, en milisegundos. */
 const MS_PASO_GIRO = 100;
 
-/**
- * Ángulo del mapa, suavizado y sin saltos.
- *
- * Aplicar el rumbo directo al CSS tenía dos problemas. Uno: al cruzar el norte
- * el rumbo salta de 359° a 1°, y la transición de CSS interpola por el lado
- * largo, así que el mapa daba una vuelta completa hacia atrás en cada giro
- * hacia el norte. Dos: el rumbo del GPS tiembla unos grados aunque se vaya
- * derecho, y eso se veía como vibración.
- *
- * Se resuelve acumulando un ángulo continuo —puede pasar de 360 o de 0 sin
- * problema— al que se avanza siempre por el lado corto. El paso es adaptativo:
- * un giro de verdad se sigue rápido, el temblor se amortigua.
- */
 const useGiroSuave = (rumbo, activo) => {
   const [angulo, setAngulo] = useState(-(rumbo || 0));
   const anguloRef = useRef(-(rumbo || 0));
@@ -133,8 +117,6 @@ const SeguirTecnico = ({ posicion, rumbo, zoom }) => {
   const map = useMap();
 
   useEffect(() => {
-    // El contenedor va girado por CSS, así que arrastrar o hacer zoom con los
-    // dedos daría coordenadas cruzadas. En navegación el mapa se maneja solo.
     map.dragging.disable();
     map.doubleClickZoom.disable();
     map.scrollWheelZoom.disable();
@@ -157,7 +139,6 @@ const SeguirTecnico = ({ posicion, rumbo, zoom }) => {
     const desplazamiento = map.getSize().y * ADELANTO_CENTRO;
     const radianes = (rumbo || 0) * Math.PI / 180;
 
-    // En píxeles proyectados la y crece hacia el sur, de ahí el signo del coseno.
     const punto = map.project([posicion.lat, posicion.lng], zoom)
       .add(L.point(
         Math.sin(radianes) * desplazamiento,
@@ -170,18 +151,6 @@ const SeguirTecnico = ({ posicion, rumbo, zoom }) => {
   return null;
 };
 
-/**
- * Mapa con la ruta más corta entre el técnico y el domicilio.
- *
- * @param {{lat:number,lng:number}} origen        posición del técnico
- * @param {{lat:number,lng:number}} destino       domicilio de la instalación
- * @param {string}                  etiquetaDestino
- * @param {number}                  alturaMapa
- * @param {(datos:{etaMinutos:number,distanciaMetros:number}) => void} onRutaCalculada
- * @param {string}                  actualizadoEn ISO de la última posición (vista oficina)
- * @param {boolean}                 modoNavegacion centra, sigue y gira con el técnico
- * @param {object}                  rutaPrecalculada ruta ya trazada por quien nos usa
- */
 const MapaRutaInstalacion = ({
   origen,
   destino,
@@ -198,8 +167,6 @@ const MapaRutaInstalacion = ({
   const [rutaInterna, setRutaInterna] = useState(null);
   const [calculando, setCalculando] = useState(false);
 
-  // En navegación la ruta la trae el hook (con las maniobras); pedirla otra vez
-  // aquí sería una segunda llamada al ruteador por cada movimiento.
   const ruta = rutaPrecalculada || rutaInterna;
   const trazaPropia = !rutaPrecalculada;
 
@@ -238,12 +205,8 @@ const MapaRutaInstalacion = ({
 
   const navegando = modoNavegacion && Boolean(origen) && Boolean(destino);
 
-  // Va antes del return de "sin coordenadas" porque es un hook: tiene que
-  // ejecutarse siempre, en todos los renders.
   const anguloMapa = useGiroSuave(origen?.rumbo || 0, navegando);
 
-  // El contenedor gira `anguloMapa` y la flecha gira lo contrario, así que se
-  // cancelan exactamente y queda apuntando hacia adelante sin desfasarse.
   const contragiro = -anguloMapa;
 
   if (!destino) {
@@ -270,8 +233,6 @@ const MapaRutaInstalacion = ({
       />
 
       {navegando
-        // Se le pasa el rumbo ya suavizado, el mismo que gira el mapa: si el
-        // encuadre usara el crudo, el centro y la imagen irían desfasados.
         ? <SeguirTecnico posicion={origen} rumbo={contragiro} zoom={17} />
         : <EncuadrarRuta puntos={puntosEncuadre} />}
 
@@ -375,9 +336,6 @@ const MapaRutaInstalacion = ({
         }}
       >
         {navegando ? (
-          // El mapa se gira entero con CSS y se dibuja más grande que su marco:
-          // al rotar un rectángulo dentro de su propio tamaño quedarían las
-          // esquinas vacías.
           <Box
             style={{ '--contragiro': `${contragiro}deg` }}
             sx={{
@@ -388,8 +346,6 @@ const MapaRutaInstalacion = ({
               height: '150%',
               transform: `rotate(${anguloMapa}deg)`,
               transformOrigin: '50% 50%',
-              // Corta: el ángulo ya viene suavizado desde useGiroSuave, esto
-              // solo rellena entre un paso y el siguiente.
               transition: `transform ${MS_PASO_GIRO}ms linear`
             }}
           >

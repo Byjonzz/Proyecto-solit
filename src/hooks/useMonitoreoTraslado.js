@@ -9,32 +9,14 @@ const MINUTOS_SIN_MOVIMIENTO = 8;
 
 const MINUTOS_TOLERANCIA_ETA = 10;
 
-/**
- * Cada cuánto se manda la posición al servidor.
- *
- * Marca el ritmo al que la oficina ve avanzar al técnico, y debe ir a la par de
- * MS_REFRESCO_SEGUIMIENTO en la pantalla de logística: si se reporta más
- * espaciado que eso, el punto se ve detenido aunque vaya en movimiento.
- *
- * Es un mínimo, no un reloj: solo se manda cuando el GPS entrega una lectura
- * nueva, así que el aparato marca el ritmo real.
- */
 const SEGUNDOS_ENTRE_REPORTES = 2;
 
 const MS_REVISION = 15000;
 
-/** Milisegundos en un minuto. Nombrado para no volver a teclearlo mal. */
 const MS_POR_MINUTO = 60000;
 
-/**
- * Avance mínimo para deducir el rumbo de dos lecturas seguidas.
- *
- * Por debajo de esto el "movimiento" es ruido del GPS y el rumbo saldría
- * girando solo con el aparato quieto.
- */
 const METROS_PARA_RUMBO = 12;
 
-/** Debajo de esta velocidad (m/s) el rumbo del navegador no es de fiar. */
 const VELOCIDAD_MINIMA_RUMBO = 0.6;
 
 export const useMonitoreoTraslado = ({ instalacion, activo }) => {
@@ -83,10 +65,6 @@ export const useMonitoreoTraslado = ({ instalacion, activo }) => {
       (pos) => {
         const { latitude, longitude, accuracy, heading, speed } = pos.coords;
 
-        // El rumbo mueve el mapa en modo navegación. El navegador solo lo
-        // entrega yendo en movimiento; parado o en escritorio llega null, así
-        // que se deduce de dos lecturas separadas y, si no, se conserva el
-        // último bueno para que el mapa no se ponga a girar solo.
         const anterior = refRumbo.current;
         if (heading != null && !Number.isNaN(heading) && (speed == null || speed > VELOCIDAD_MINIMA_RUMBO)) {
           rumboRef.current = heading;
@@ -128,9 +106,6 @@ export const useMonitoreoTraslado = ({ instalacion, activo }) => {
         }
       },
       (error) => setErrorGps(error?.message || 'No se pudo obtener la ubicación.'),
-      // maximumAge acompaña al ritmo de reporte: con 10 s el navegador podía
-      // entregar una lectura guardada de hace 10 s, así que se reportaba cada
-      // 2 s la misma posición vieja y el punto igual se veía detenido.
       { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 }
     );
 

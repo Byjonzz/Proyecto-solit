@@ -30,15 +30,11 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    // Token vencido o invalidado: se limpia la sesión y se vuelve al login en
-    // vez de dejar la pantalla con errores en cada petición.
     if (error.response?.status === 401) {
       const habiaSesion = Boolean(localStorage.getItem('auth_token'));
       localStorage.removeItem('auth_token');
       localStorage.removeItem('usuario_actual');
 
-      // Se recarga solo si había sesión, para no entrar en bucle cuando el
-      // propio login responde 401 por credenciales incorrectas.
       if (habiaSesion && !error.config?.url?.includes('/login/')) {
         window.location.reload();
       }

@@ -23,14 +23,12 @@ const ContratoyFirma = () => {
       </Box>
 
       <Grid container spacing={3}>
-        {}
         <Grid item xs={12} md={8} sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
           <Alert severity="info" sx={{ borderRadius: 2 }}>
             <Typography variant="subtitle2" fontWeight="bold">Tiempo estimado de instalación</Typography>
             <Typography variant="body2">Zona con cobertura de Fibra Óptica activa. Se valida infraestructura disponible en los postes adyacentes.</Typography>
           </Alert>
 
-          {}
           <Card elevation={0} sx={{ border: '1px solid #e0e0e0', borderRadius: 3 }}>
             <CardHeader title={<Typography variant="subtitle2" fontWeight="bold">Firma digital del titular</Typography>} />
             <Divider />
@@ -67,7 +65,6 @@ const ContratoyFirma = () => {
             </CardContent>
           </Card>
 
-          {}
           <Card elevation={0} sx={{ border: '1px solid #e0e0e0', borderRadius: 3 }}>
             <CardHeader title={<Typography variant="subtitle2" fontWeight="bold">Evidencia fotográfica del domicilio</Typography>} />
             <Divider />
@@ -90,7 +87,6 @@ const ContratoyFirma = () => {
           </Card>
         </Grid>
 
-        {}
         <Grid item xs={12} md={4} sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
           <Card elevation={0} sx={{ border: '1px solid #e0e0e0', borderRadius: 3 }}>
             <CardHeader title={<Typography variant="subtitle2" fontWeight="bold">Datos de validación del cliente</Typography>} />
@@ -125,7 +121,6 @@ const ContratoyFirma = () => {
         </Grid>
       </Grid>
 
-      {}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 4, pt: 3, borderTop: '1px solid #e0e0e0' }}>
         <Button variant="outlined" color="inherit" startIcon={<ArrowBackIcon />} sx={{ fontWeight: 'bold' }}>
           Regresar

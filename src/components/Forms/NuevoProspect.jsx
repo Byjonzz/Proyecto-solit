@@ -105,9 +105,6 @@ const TablaPlanesCanvaceo = ({ planes, seleccionadoId, onSelect, titulo, colorPr
 };
 
 const SeleccionPlanesCanvaceo = ({ planSeleccionado, onPlanSeleccionado, categorias = [] }) => {
-  // Se identifica por nombre y no por una clave fija ('simetrica', 'hibrido'):
-  // las categorías se renombran desde administración y una clave escrita a mano
-  // dejaría de corresponder con nada.
   const [categoria, setCategoria] = useState('');
   const handleSeleccionar = (plan) => { onPlanSeleccionado(plan); };
 
@@ -117,8 +114,6 @@ const SeleccionPlanesCanvaceo = ({ planSeleccionado, onPlanSeleccionado, categor
     if (categorias.length > 0 && !categorias.find(c => c.nombre === categoria)) {
       setCategoria(categorias[0].nombre);
     }
-    // Se compara la lista de nombres y no el arreglo: usePlanes devuelve uno
-    // nuevo en cada refresco y el efecto se repetiría sin que nada cambie.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nombres, categoria]);
 
@@ -197,9 +192,7 @@ const NuevoProspect = ({
   const [pendientesOffline, setPendientesOffline] = useState(0);
   const [alertaOffline, setAlertaOffline] = useState(null);
 
-  // Diálogo de resumen y confirmación previo al guardado.
   const [confirmacionAbierta, setConfirmacionAbierta] = useState(false);
-  // Falla del servicio de mapas al traducir coordenadas.
   const [errorGeocode, setErrorGeocode] = useState(null);
 
   const [erroresValidacion, setErroresValidacion] = useState({
@@ -212,7 +205,6 @@ const NuevoProspect = ({
   const { createProspecto } = useProspectos();
   const { categorias, loading: loadingPlanesOriginal } = usePlanes();
 
-  // CACHÉ LOCAL DE PLANES
   const [categoriasCache, setCategoriasCache] = useState([]);
   const [cargandoPlanes, setCargandoPlanes] = useState(true);
 
@@ -231,8 +223,6 @@ const NuevoProspect = ({
         : 'Nuevo';
 
   useEffect(() => {
-    // Clave nueva a propósito: la caché vieja guardaba cinco listas fijas y
-    // ahora es un arreglo de categorías. Leer el formato anterior reventaría.
     const guardadas = JSON.parse(localStorage.getItem('categorias_canvaceo_offline') || 'null');
 
     if (categorias.length > 0) {
@@ -247,7 +237,6 @@ const NuevoProspect = ({
     }
   }, [categorias, loadingPlanesOriginal, isOnline]);
 
-  // MONITOR OFFLINE/ONLINE
   useEffect(() => {
     const handleOnline = () => {
       setIsOnline(true);
@@ -372,8 +361,6 @@ const NuevoProspect = ({
   const soloLetras = (valor) => /^[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\s'.-]*$/.test(valor);
 
   const handleNombreChange = (valor) => {
-    // Filtramos caracteres inválidos al teclear, pero la validación de fondo
-    // (que sea un nombre y no relleno) se hace al intentar avanzar de paso.
     if (!soloLetras(valor)) {
       setErroresValidacion(prev => ({ ...prev, nombre: true, nombreMensaje: 'El nombre solo puede llevar letras' }));
       return;
@@ -392,12 +379,6 @@ const NuevoProspect = ({
     setErroresValidacion(prev => ({ ...prev, telefono: false, telefonoMensaje: '' }));
   };
 
-  /**
-   * Valida el paso indicado y deja los errores en pantalla.
-   *
-   * Cada paso se valida al intentar salir de él, no al final: si el canvaceador
-   * puso datos al azar en el paso 1, no tiene sentido enterarse hasta el paso 4.
-   */
   const validarPaso = (paso) => {
     let errores = {};
 
@@ -409,8 +390,6 @@ const NuevoProspect = ({
     }
 
     if (paso === 1) {
-      // La ubicación es opcional (el paso se puede saltar), pero si el
-      // canvaceador escribió algo, tiene que ser información real.
       if (metodoUbicacion === 'manual') {
         const errCalle = validarDireccion(formData.direccion_calle_numero, {
           obligatorio: false, etiqueta: 'La calle y número'
@@ -449,8 +428,6 @@ const NuevoProspect = ({
   const handleNext = async () => {
     if (!validarPaso(activeStep)) return;
 
-    // Último paso: no guardamos directo, primero mostramos el resumen para que
-    // confirme. Guardar sin confirmación es lo que provoca registros basura.
     if (activeStep === pasos.length - 1) {
       setConfirmacionAbierta(true);
       return;
@@ -577,17 +554,12 @@ const NuevoProspect = ({
       return;
     }
 
-    // Sin traducción avisamos en pantalla en vez de escribir las coordenadas
-    // dentro del campo de dirección, que se leía como si esa fuera la calle.
     setErrorGeocode(error);
     console.warn('No se pudo traducir las coordenadas:', error);
   };
 
   const obtenerUbicacionGPS = async () => {
     setLoadingGps(true);
-    // El helper explica la causa real cuando no hay GPS (página http, permiso
-    // negado, etc.); antes siempre se culpaba al permiso y el canvaceador no
-    // sabía que en realidad el navegador estaba bloqueando la ubicación.
     const { punto, error } = await obtenerPosicionActual();
     setLoadingGps(false);
     if (!punto) {
@@ -673,7 +645,6 @@ const NuevoProspect = ({
                 <Alert severity="error" sx={{ mb: 2 }}>{erroresValidacion.direccionMensaje}</Alert>
               )}
 
-              {/* Se capturó el punto pero el servicio de mapas no dio la calle */}
               {errorGeocode && !loadingGeocode && (
                 <Alert
                   severity="warning"
@@ -805,7 +776,6 @@ const NuevoProspect = ({
           <Box sx={{ mt: 2 }}>
             {errorApi && (<Alert severity="error" sx={{ mb: 2, whiteSpace: 'pre-line' }}>{errorApi}</Alert>)}
 
-            {/* Chip con la clasificación resultante */}
             {typeof verificarCobertura === 'function' && dentroCobertura !== null && (
               <Chip
                 icon={dentroCobertura ? <CheckCircle /> : <Place />}
@@ -868,8 +838,6 @@ const NuevoProspect = ({
                 {renderStepContent(index)}
 
                 <Box sx={{ mb: 2, mt: 3 }}>
-                  {/* Atrás primero y la acción principal al final, igual que en
-                      el formulario de contrato. */}
                   <Button disabled={index === 0 || guardando} onClick={handleBack} sx={{ mr: 1 }}>Atrás</Button>
                   {isStepOptional(index) && <Button color="inherit" onClick={handleSkip} sx={{ mr: 1 }}>Saltar</Button>}
                   <Button variant="contained" onClick={handleNext} disabled={guardando} color={isOnline ? "primary" : "warning"}>
@@ -918,7 +886,6 @@ const NuevoProspect = ({
         )}
       </Paper>
 
-      {/* Resumen y confirmación antes de guardar */}
       <Dialog
         open={confirmacionAbierta}
         onClose={() => !guardando && setConfirmacionAbierta(false)}

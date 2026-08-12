@@ -24,14 +24,6 @@ import api from './services/api';
 const drawerWidth = 260;
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
-/**
- * Inicia sesión contra el backend.
- *
- * Antes esta función descargaba /api/usuarios/ completo y comparaba la
- * contraseña en el navegador: eso exponía las contraseñas de todo el personal a
- * cualquiera que abriera esa URL. Ahora las credenciales se validan en el
- * servidor y lo único que regresa es un token de sesión.
- */
 const loginUsuario = async (email, password) => {
   const respuesta = await fetch(`${API_BASE_URL}/login/`, {
     method: 'POST',
@@ -50,7 +42,6 @@ const loginUsuario = async (email, password) => {
     throw new Error(datos?.error || 'Correo o contraseña incorrectos');
   }
 
-  // El token viaja en cada petición mediante el interceptor de services/api.js.
   localStorage.setItem('auth_token', datos.token);
 
   return { success: true, usuario: datos.usuario };
@@ -66,8 +57,6 @@ function App() {
     const usuarioGuardado = localStorage.getItem('usuario_actual');
     const token = localStorage.getItem('auth_token');
 
-    // Sin token no hay sesión válida aunque quede el usuario en el navegador
-    // (por ejemplo tras cerrar sesión desde otra pestaña).
     if (!usuarioGuardado || !token) {
       localStorage.removeItem('usuario_actual');
       localStorage.removeItem('auth_token');
@@ -78,8 +67,6 @@ function App() {
     setUsuarioActual(usuario);
     setCurrentView(obtenerPrimeraRuta(usuario.rol));
 
-    // Revalida el token contra el servidor: pudo expirar o haberse invalidado
-    // al iniciar sesión en otro dispositivo.
     api.get('/yo/')
       .then(({ data }) => {
         localStorage.setItem('usuario_actual', JSON.stringify(data));
@@ -102,12 +89,9 @@ function App() {
   };
 
   const handleLogout = async () => {
-    // Se avisa al servidor para que borre el token: si solo se limpiara el
-    // navegador, el token seguiría siendo válido para quien lo tuviera.
     try {
       await api.post('/logout/');
     } catch {
-      // Sin red igual cerramos la sesión local.
     }
     localStorage.removeItem('usuario_actual');
     localStorage.removeItem('auth_token');

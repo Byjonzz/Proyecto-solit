@@ -26,9 +26,6 @@ import {
 } from '@mui/icons-material';
 import { usePlanes } from '../../hooks/usePlanes';
 
-// Cada categoría guarda el nombre lógico de su icono y aquí se traduce al set de
-// esta pantalla. Así el catálogo no depende de qué iconos tenga instalado el
-// frontend, y uno desconocido cae en el genérico en vez de romper la vista.
 const ICONOS = {
   fibra: FiberManualRecord,
   wifi: Wifi,
@@ -214,9 +211,6 @@ const SeleccionPlanes = ({ planSeleccionado, onPlanSeleccionado }) => {
     setTabActiva(newValue);
   };
 
-  // El catálogo se refresca solo: si administración borra o desactiva la
-  // categoría que estaba abierta, hay que volver a una válida o la vista se
-  // quedaría en blanco.
   useEffect(() => {
     if (tabActiva > categorias.length - 1) setTabActiva(0);
   }, [categorias.length, tabActiva]);
@@ -251,8 +245,6 @@ const SeleccionPlanes = ({ planSeleccionado, onPlanSeleccionado }) => {
     );
   }
 
-  // El color de la pestaña activa manda sobre el subrayado, para que al
-  // renombrar o recolorear una categoría todo se mueva junto.
   const colorActivo = categorias[tabActiva]?.color || '#d63384';
 
   return (

@@ -4,13 +4,6 @@ import { PictureAsPdf, ZoomIn, OpenInNew } from '@mui/icons-material';
 
 import { esPdf } from '../../utils/evidencias';
 
-/**
- * Miniatura de una evidencia.
- *
- * Un <img> no puede renderizar un PDF: si el comprobante llega en ese formato se
- * muestra una tarjeta con el ícono y un botón para abrirlo, en vez de un
- * recuadro roto.
- */
 const VistaEvidencia = ({ valor, titulo, altura = 140, onAmpliar = null }) => {
   if (!valor) {
     return <Typography variant="caption" color="text.secondary">Sin archivo</Typography>;

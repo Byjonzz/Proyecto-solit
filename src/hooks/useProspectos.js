@@ -2,17 +2,11 @@ import { useState, useEffect } from 'react';
 import { prospectosService } from '../services/prospectosService';
 import { paramsDeRegistrador } from '../utils/propiedad';
 
-/**
- * @param {object} usuarioActual  Si se pasa, la consulta se acota a los
- *   prospectos que capturó ese usuario. Sin él devuelve todos (vista de oficina).
- */
 export const useProspectos = (usuarioActual = null) => {
   const [prospectos, setProspectos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Se serializa para poder usarlo como dependencia estable del efecto: el
-  // objeto `usuarioActual` cambia de identidad en cada render del padre.
   const filtros = usuarioActual ? paramsDeRegistrador(usuarioActual) : {};
   const claveFiltros = JSON.stringify(filtros);
 

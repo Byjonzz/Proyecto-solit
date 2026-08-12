@@ -18,8 +18,6 @@ import { soloMisRegistros, paramsDeRegistrador } from '../../utils/propiedad';
 import BotonEvidencia from '../Forms/BotonEvidencia';
 import VistaEvidencia from '../Forms/VistaEvidencia';
 
-// Fotos que el canvaceador puede volver a subir. Los datos de texto no se tocan:
-// ya pasaron la validación del formulario de contrato.
 const CAMPOS_FOTO = [
   { campo: 'foto_ine_frente', etiqueta: 'INE (frente)' },
   { campo: 'foto_ine_reverso', etiqueta: 'INE (reverso)' },
@@ -30,8 +28,6 @@ const CAMPOS_FOTO = [
 const FILTROS = [
   { value: 'instalacion', label: 'En Instalación', icono: Build, color: '#3b82f6', colorHover: '#2563eb' },
   { value: 'rechazados', label: 'Rechazados', icono: Cancel, color: '#ef4444', colorHover: '#dc2626' },
-  // Gris: no es un problema que el canvaceador deba resolver, es una venta que
-  // ya no va. Solo se consulta.
   { value: 'cancelados', label: 'Cancelados', icono: Block, color: '#64748b', colorHover: '#475569' }
 ];
 
@@ -43,10 +39,8 @@ const MisContratos = ({ usuarioActual }) => {
 
   const [filtro, setFiltro] = useState('instalacion');
 
-  // Detalle en solo lectura (contratos en instalación)
   const [detalle, setDetalle] = useState(null);
 
-  // Corrección de evidencias (contratos rechazados)
   const [corrigiendo, setCorrigiendo] = useState(null);
   const [fotosNuevas, setFotosNuevas] = useState({});
   const [enviando, setEnviando] = useState(false);
@@ -62,8 +56,6 @@ const MisContratos = ({ usuarioActual }) => {
     try {
       setCargando(true);
       setError('');
-      // El servidor ya acota por registrador; el filtro local queda como red de
-      // seguridad por si la respuesta llegara sin filtrar.
       const data = await revisionContratosService.getAll(paramsDeRegistrador(usuarioActual));
       setContratos(soloMisRegistros(data, usuarioActual));
     } catch (err) {
@@ -86,12 +78,10 @@ const MisContratos = ({ usuarioActual }) => {
     return new Date(iso).toLocaleString('es-MX', {
       year: 'numeric', month: 'short', day: 'numeric',
       hour: '2-digit', minute: '2-digit',
-      // Hora de México siempre, aunque el dispositivo tenga otra zona.
       timeZone: 'America/Mexico_City'
     });
   };
 
-  // ===== Corrección de evidencias =====
   const abrirCorreccion = (contrato) => {
     setCorrigiendo(contrato);
     setFotosNuevas({});
@@ -122,7 +112,6 @@ const MisContratos = ({ usuarioActual }) => {
     }
   };
 
-  // Fotos que logística señaló como incorrectas, deducidas del motivo guardado.
   const fotosSenaladas = (contrato) => {
     const motivo = (contrato?.motivo_rechazo || '').toLowerCase();
     const senaladas = new Set();
@@ -284,9 +273,6 @@ const MisContratos = ({ usuarioActual }) => {
                   />
                 </TableCell>
                 <TableCell align="center">
-                  {/* Se pregunta por 'rechazados' y no por "el que no es
-                      instalación": así un filtro nuevo nace de solo lectura en
-                      vez de heredar el botón de corregir sin querer. */}
                   {filtro === 'rechazados' ? (
                     <Button
                       variant="contained" size="small" color="error" startIcon={<CloudUpload />}
@@ -314,7 +300,6 @@ const MisContratos = ({ usuarioActual }) => {
         </Table>
       </TableContainer>
 
-      {/* ===== Detalle en solo lectura ===== */}
       <Dialog open={Boolean(detalle)} onClose={() => setDetalle(null)} maxWidth="sm" fullWidth
         slotProps={{ paper: { sx: { borderRadius: 3 } } }}>
         <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 700 }}>
@@ -381,7 +366,6 @@ const MisContratos = ({ usuarioActual }) => {
         </DialogActions>
       </Dialog>
 
-      {/* ===== Corrección de evidencias ===== */}
       <Dialog open={Boolean(corrigiendo)} onClose={() => !enviando && setCorrigiendo(null)}
         maxWidth="sm" fullWidth slotProps={{ paper: { sx: { borderRadius: 3 } } }}>
         <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 700 }}>
@@ -429,7 +413,6 @@ const MisContratos = ({ usuarioActual }) => {
                           onAmpliar={() => setVisor({ open: true, url: nueva || corrigiendo[campo], titulo: etiqueta })}
                         />
 
-                        {/* El comprobante acepta PDF; el resto son fotos */}
                         <BotonEvidencia
                           etiqueta={nueva ? 'Cambiar de nuevo' : (esComprobante ? 'Subir comprobante' : 'Subir foto')}
                           cargada={Boolean(nueva)}
@@ -464,14 +447,12 @@ const MisContratos = ({ usuarioActual }) => {
         </DialogActions>
       </Dialog>
 
-      {/* Visor de imagen */}
       <Dialog open={visor.open} onClose={() => setVisor({ open: false, url: '', titulo: '' })} maxWidth="md" fullWidth>
         <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           {visor.titulo}
           <IconButton onClick={() => setVisor({ open: false, url: '', titulo: '' })}><Close /></IconButton>
         </DialogTitle>
         <DialogContent sx={{ textAlign: 'center', p: 2 }}>
-          {/* Un PDF no se puede mostrar en <img>: va en un iframe */}
           {esPdf(visor.url) ? (
             <iframe
               src={visor.url}

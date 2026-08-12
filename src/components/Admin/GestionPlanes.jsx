@@ -14,17 +14,12 @@ import {
   categoriasCatalogoService, AMBITOS, ICONOS_CATEGORIA, VISTAS_CATEGORIA
 } from '../../services/categoriasCatalogoService';
 
-// Las categorías ya no viven aquí: son un catálogo editable desde esta misma
-// pantalla (el botón "Categorías"), y de ahí las leen también el formulario de
-// contrato y el de prospectos.
 const FORM_CATEGORIA_VACIO = {
   nombre: '',
   color: '#1976d2',
   descripcion: '',
   icono: 'fibra',
   vista: 'tarjetas',
-  // Vacío, no 0: así una categoría nueva se va al final en vez de colarse
-  // al principio sin que nadie lo haya pedido.
   orden: '',
   activo: true
 };
@@ -82,11 +77,10 @@ const GestionPlanes = ({ usuarioActual }) => {
   const [categoriaActivaInternet, setCategoriaActivaInternet] = useState(0);
   const [categoriaActivaChip, setCategoriaActivaChip] = useState(0);
 
-  // Catálogo editable de pestañas, por ámbito.
   const { categorias: catalogoInternet, refetch: refetchInternet } = useCategorias(AMBITOS.INTERNET);
   const { categorias: catalogoChips, refetch: refetchChips } = useCategorias(AMBITOS.CHIP);
 
-  const [dialogoCategorias, setDialogoCategorias] = useState(null); // 'internet' | 'chip'
+  const [dialogoCategorias, setDialogoCategorias] = useState(null);
   const [categoriaEditando, setCategoriaEditando] = useState(null);
   const [formCategoria, setFormCategoria] = useState(FORM_CATEGORIA_VACIO);
   const [guardandoCategoria, setGuardandoCategoria] = useState(false);
@@ -360,21 +354,15 @@ const GestionPlanes = ({ usuarioActual }) => {
   const getCardColorInternet = (categoria) =>
     catalogoInternet.find(c => c.nombre === categoria)?.color || '#1976d2';
 
-  // Aquí se muestran todas, activas o no: desactivar una la quita del formulario
-  // de venta, pero administración tiene que poder seguir viendo sus planes.
   const categoriasInternetList = catalogoInternet.map(c => c.nombre);
   const planesInternetFiltrados = planesInternet.filter(p => p.categoria === categoriasInternetList[categoriaActivaInternet]);
 
   const categoriasChipsList = catalogoChips.map(c => c.nombre);
   const planesChipsFiltrados = planesSim.filter(p => p.categoria === categoriasChipsList[categoriaActivaChip]);
 
-  // Qué campos pide el formulario ya no depende del nombre de la categoría
-  // —que ahora se puede renombrar— sino de cómo pidió dibujarse: las de tabla
-  // llevan una sola velocidad, las de tarjetas llevan descarga y subida.
   const categoriaDelFormulario = catalogoInternet.find(c => c.nombre === formData.categoria);
   const categoriaEsTabla = (categoriaDelFormulario?.vista || 'tarjetas') === 'tabla';
 
-  // ===== Catálogo de categorías =====
   const catalogoActivo = dialogoCategorias === AMBITOS.CHIP ? catalogoChips : catalogoInternet;
 
   const abrirCategorias = (ambito) => {
@@ -398,8 +386,6 @@ const GestionPlanes = ({ usuarioActual }) => {
 
   const refrescarCatalogo = async () => {
     await Promise.all([refetchInternet(), refetchChips()]);
-    // Renombrar arrastra la categoría de los planes, así que la lista de planes
-    // que está en pantalla también quedó vieja.
     await cargarPlanes();
   };
 
@@ -412,7 +398,6 @@ const GestionPlanes = ({ usuarioActual }) => {
 
     setGuardandoCategoria(true);
     try {
-      // El campo de orden es texto en pantalla; el servidor espera un entero.
       const datos = {
         ...formCategoria,
         nombre,
@@ -429,7 +414,6 @@ const GestionPlanes = ({ usuarioActual }) => {
           'success'
         );
       } else {
-        // Una categoría nueva va al final salvo que se le haya puesto un orden.
         await categoriasCatalogoService.crear({
           ...datos,
           orden: formCategoria.orden === '' ? catalogoActivo.length : datos.orden
@@ -967,7 +951,6 @@ const GestionPlanes = ({ usuarioActual }) => {
         </DialogActions>
       </Dialog>
 
-      {/* ===== Catálogo de categorías (las pestañas) ===== */}
       <Dialog
         open={Boolean(dialogoCategorias)}
         onClose={() => !guardandoCategoria && setDialogoCategorias(null)}

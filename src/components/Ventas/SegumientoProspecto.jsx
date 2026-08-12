@@ -47,7 +47,6 @@ const FILTROS = [
 ];
 
 const SegumientoProspecto = ({ usuarioActual }) => {
-  // El hook ya pide al servidor solo los prospectos de este usuario.
   const { prospectos, loading, error, updateEstadoProspecto } = useProspectos(usuarioActual);
 
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -91,7 +90,6 @@ const SegumientoProspecto = ({ usuarioActual }) => {
   const esCliente = (prospecto) =>
     prospecto.estado === ESTADO_VENDIDO || idsConCliente.has(Number(prospecto.id));
 
-  // Cada quien ve solo lo que capturó; logística y administración ven todo.
   const prospectosDelUsuario = useMemo(
     () => soloMisRegistros(prospectos, usuarioActual),
     [prospectos, usuarioActual]

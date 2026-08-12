@@ -37,7 +37,6 @@ const Reports = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {}
         <div className="lg:col-span-2 bg-gray-50 p-6 rounded-lg">
           <h3 className="font-semibold text-gray-800 mb-4">Leads por estado</h3>
           <ResponsiveContainer width="100%" height={300}>
@@ -61,7 +60,6 @@ const Reports = () => {
           </ResponsiveContainer>
         </div>
 
-        {}
         <div className="space-y-4">
           <div className="bg-green-50 p-4 rounded-lg border border-green-200">
             <p className="text-sm text-green-700">Interesados</p>
@@ -78,7 +76,6 @@ const Reports = () => {
         </div>
       </div>
 
-      {}
       <div className="mt-8 bg-gray-50 p-6 rounded-lg">
         <h3 className="font-semibold text-gray-800 mb-4">Ventas por plan</h3>
         <ResponsiveContainer width="100%" height={300}>

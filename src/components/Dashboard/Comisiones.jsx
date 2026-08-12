@@ -35,9 +35,6 @@ const inputReglaStyle = {
   }
 };
 
-// Fecha real del equipo. Antes estaba fija en el 19/06/2026, así que el panel
-// abría en junio y ocultaba como "futuro" cualquier día posterior: los contratos
-// de meses siguientes quedaban invisibles y no había forma de navegar hasta ellos.
 const FECHA_HOY_REAL = new Date();
 
 const normalizarFecha = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -78,7 +75,6 @@ const Comisiones = () => {
   const [equipo, setEquipo] = useState([]);
   const [modalInfoPago, setModalInfoPago] = useState(false);
   
-  // Arranca en el mes en curso y con el día de hoy seleccionado.
   const [mesFoco, setMesFoco] = useState(PRIMER_DIA_DEL_MES_ACTUAL);
   const [diaSeleccionado, setDiaSeleccionado] = useState(normalizarFecha(FECHA_HOY_REAL));
 
@@ -157,13 +153,8 @@ const Comisiones = () => {
       }
       
       const equipoTransformado = canvaceadores.map(canv => {
-        // `usuario` no existe en el modelo Usuario: el campo es `nombre`. Con la
-        // clave equivocada el nombre quedaba solo con el apellido.
         const nombreCompleto = `${canv.nombre || ''} ${canv.apellido || ''}`.trim() || `Agente #${canv.id}`;
 
-        // La FK llega como id numérico, pero normalizamos ambos lados: si alguna
-        // respuesta lo devolviera como texto (o como objeto anidado), un `===`
-        // estricto descartaría contratos que sí son de este canvaceador.
         const idCanv = Number(canv.id);
         const contratosDelAgente = todosContratos.filter(c => {
           const idContrato = typeof c.canvaceador_id === 'object'
@@ -174,8 +165,6 @@ const Comisiones = () => {
 
         const contratosPendientesAgente = contratosDelAgente.filter(c => !c.comision_pagada);
 
-        // Preferimos lo que calcula el backend, pero si viniera vacío usamos el
-        // conteo local para no mostrar 0 contratos teniendo los datos a la mano.
         const totalVentas = canv.contratos_pendientes || contratosPendientesAgente.length;
         const volumenDinero = canv.volumen_pendiente ||
           contratosPendientesAgente.reduce((suma, c) => suma + (parseFloat(c.monto_total) || 0), 0);
@@ -213,7 +202,6 @@ const Comisiones = () => {
           numeroEmpleado: canv.numero_empleado || `EMP-${canv.id}`,
           totalVentas,
           volumenDinero,
-          // Todos los contratos que ha hecho, se haya pagado la comisión o no.
           totalContratosHistorico: contratosDelAgente.length,
           volumenHistorico: contratosDelAgente.reduce((s, c) => s + (parseFloat(c.monto_total) || 0), 0),
           horasApp,
@@ -493,7 +481,6 @@ const Comisiones = () => {
                     fontFamily: 'Segoe UI, Helvetica, Arial, sans-serif',
                     boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
                   }}>
-                    {/* Barra Superior */}
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: '12px 16px', bgcolor: '#dbdbdb' }}>
                       <Typography sx={{ fontSize: '15px', fontWeight: 500, color: '#1a1a1a', textTransform: 'lowercase' }}>
                         {obtenerEtiquetaFecha(diaSeleccionado)}

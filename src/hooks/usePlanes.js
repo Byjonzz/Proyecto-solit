@@ -6,7 +6,6 @@ import { tonosDeCategoria } from '../utils/colores';
 
 const MS_REFRESCO = 30000;
 
-/** Los nombres se comparan sin mayúsculas ni espacios de sobra. */
 const normalizar = (valor) => (valor || '').toLowerCase().trim();
 
 export const usePlanes = () => {
@@ -15,8 +14,6 @@ export const usePlanes = () => {
   const [error, setError] = useState(null);
   const [lastUpdate, setLastUpdate] = useState(null);
 
-  // Las pestañas y sus colores salen del catálogo, no de una lista escrita a
-  // mano: renombrar una categoría en administración se refleja aquí solo.
   const { categorias: catalogo, loading: cargandoCategorias } = useCategorias(AMBITOS.INTERNET);
 
   const fetchPlanes = useCallback(async () => {
@@ -55,8 +52,6 @@ export const usePlanes = () => {
     };
   }, [fetchPlanes]);
 
-  // Índice por nombre normalizado, para colgarle a cada plan el color y la
-  // forma de dibujarse de su categoría sin recorrer el catálogo por plan.
   const catalogoPorNombre = useMemo(() => {
     const mapa = new Map();
     catalogo.forEach(c => mapa.set(normalizar(c.nombre), c));
@@ -82,13 +77,6 @@ export const usePlanes = () => {
     };
   }, [catalogoPorNombre]);
 
-  /**
-   * Las pestañas listas para dibujar: cada una con sus planes ya transformados.
-   *
-   * Solo salen las categorías activas y con planes. Una categoría recién creada
-   * y todavía vacía existe en administración, pero no le aparece al vendedor
-   * como una pestaña sin nada dentro.
-   */
   const categorias = useMemo(() => catalogo
     .filter(c => c.activo)
     .map(c => ({
@@ -106,9 +94,6 @@ export const usePlanes = () => {
     .filter(c => c.planes.length > 0),
     [catalogo, planes, transformarPlan]);
 
-  // Todos los planes activos, incluso los de una categoría que ya no esté en el
-  // catálogo: se usan para resolver el plan de un contrato por nombre, y ahí no
-  // debe importar si su pestaña sigue existiendo.
   const todosLosPlanes = useMemo(
     () => planes.map(transformarPlan),
     [planes, transformarPlan]

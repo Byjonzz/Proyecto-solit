@@ -13,13 +13,6 @@ export const distanciaEnMetros = (lat1, lng1, lat2, lng2) => {
   return Math.round(2 * RADIO_TIERRA_M * Math.asin(Math.sqrt(a)));
 };
 
-/**
- * Rumbo en grados (0 = norte, 90 = este) del punto 1 al punto 2.
- *
- * El navegador solo entrega `coords.heading` cuando el aparato va en
- * movimiento y con GPS fino; el resto del tiempo llega en null, así que hay
- * que deducirlo comparando dos lecturas seguidas.
- */
 export const rumboEnGrados = (lat1, lng1, lat2, lng2) => {
   const aRad = (g) => (g * Math.PI) / 180;
   const dLng = aRad(lng2 - lng1);
@@ -40,12 +33,6 @@ const rutaEnLineaRecta = (origen, destino) => {
   };
 };
 
-/**
- * @param {{lat:number,lng:number}} origen
- * @param {{lat:number,lng:number}} destino
- * @param {{conPasos?:boolean}} opciones  conPasos trae las maniobras giro a giro
- * @returns {Promise<{coordenadas:Array<[number,number]>, distanciaMetros:number, duracionMinutos:number, aproximada:boolean, pasos:Array}>}
- */
 export const obtenerRuta = async (origen, destino, { conPasos = false } = {}) => {
   if (!origen || !destino) return null;
 

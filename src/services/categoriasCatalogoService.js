@@ -7,8 +7,6 @@ export const AMBITOS = {
   CHIP: 'chip'
 };
 
-// Iconos que puede elegir quien administre. La clave se guarda en la base y
-// cada pantalla la traduce a su propio set, así el backend no sabe de MUI.
 export const ICONOS_CATEGORIA = [
   { clave: 'fibra', etiqueta: 'Fibra' },
   { clave: 'wifi', etiqueta: 'WiFi' },
@@ -23,13 +21,6 @@ export const VISTAS_CATEGORIA = [
   { clave: 'tabla', etiqueta: 'Tabla' }
 ];
 
-/**
- * Avisa a las pantallas abiertas que el catálogo cambió.
- *
- * Es el mismo evento que ya escuchaba usePlanes, así que al renombrar una
- * categoría desde administración, el formulario de contrato y el de prospectos
- * se actualizan sin que nadie recargue la página.
- */
 export const avisarCatalogoActualizado = () => {
   window.dispatchEvent(new Event('planesUpdated'));
 };

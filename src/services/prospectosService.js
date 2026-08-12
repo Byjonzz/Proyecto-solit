@@ -4,10 +4,6 @@ const ENDPOINT = '/prospectos/';
 
 export const prospectosService = {
   
-  /**
-   * @param {{canvaceador_id?: number, tecnico_id?: number}} filtros
-   *   Acota la consulta al registrador. Sin filtros devuelve todos.
-   */
   getAll: async (filtros = {}) => {
     try {
       const response = await api.get(ENDPOINT, { params: filtros });
