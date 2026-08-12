@@ -6,8 +6,7 @@ import {
   CircularProgress
 } from '@mui/material';
 import {
-  Add, Edit, Delete, Save, Close, Speed, CheckCircle, PhoneAndroid, Router,
-  KeyboardArrowUp, KeyboardArrowDown
+  Add, Edit, Delete, Save, Close, Speed, CheckCircle, PhoneAndroid, Router
 } from '@mui/icons-material';
 import api from '../../services/api';
 import { useCategorias } from '../../hooks/useCategorias';
@@ -24,7 +23,9 @@ const FORM_CATEGORIA_VACIO = {
   descripcion: '',
   icono: 'fibra',
   vista: 'tarjetas',
-  orden: 0,
+  // Vacío, no 0: así una categoría nueva se va al final en vez de colarse
+  // al principio sin que nadie lo haya pedido.
+  orden: '',
   activo: true
 };
 
@@ -411,7 +412,13 @@ const GestionPlanes = ({ usuarioActual }) => {
 
     setGuardandoCategoria(true);
     try {
-      const datos = { ...formCategoria, nombre, ambito: dialogoCategorias };
+      // El campo de orden es texto en pantalla; el servidor espera un entero.
+      const datos = {
+        ...formCategoria,
+        nombre,
+        ambito: dialogoCategorias,
+        orden: Number(formCategoria.orden) || 0
+      };
 
       if (categoriaEditando) {
         await categoriasCatalogoService.actualizar(categoriaEditando.id, datos);
@@ -422,9 +429,10 @@ const GestionPlanes = ({ usuarioActual }) => {
           'success'
         );
       } else {
+        // Una categoría nueva va al final salvo que se le haya puesto un orden.
         await categoriasCatalogoService.crear({
           ...datos,
-          orden: catalogoActivo.length
+          orden: formCategoria.orden === '' ? catalogoActivo.length : datos.orden
         });
         mostrarMensaje(`Categoría "${nombre}" creada`, 'success');
       }
@@ -462,23 +470,6 @@ const GestionPlanes = ({ usuarioActual }) => {
     }
   };
 
-  /** Sube o baja una categoría intercambiando el orden con su vecina. */
-  const moverCategoria = async (cat, direccion) => {
-    const lista = [...catalogoActivo];
-    const i = lista.findIndex(c => c.id === cat.id);
-    const j = i + direccion;
-    if (i < 0 || j < 0 || j >= lista.length) return;
-
-    try {
-      await Promise.all([
-        categoriasCatalogoService.actualizar(lista[i].id, { orden: j }),
-        categoriasCatalogoService.actualizar(lista[j].id, { orden: i })
-      ]);
-      await refrescarCatalogo();
-    } catch (error) {
-      mostrarMensaje('No se pudo cambiar el orden', 'error');
-    }
-  };
 
   if (loading && planesInternet.length === 0 && planesSim.length === 0) {
     return (
@@ -1001,7 +992,7 @@ const GestionPlanes = ({ usuarioActual }) => {
                 <Typography variant="body2" color="text.secondary">
                   Todavía no hay categorías. Crea la primera con el formulario de al lado.
                 </Typography>
-              ) : catalogoActivo.map((cat, idx) => (
+              ) : catalogoActivo.map((cat) => (
                 <Paper
                   key={cat.id}
                   variant="outlined"
@@ -1023,20 +1014,6 @@ const GestionPlanes = ({ usuarioActual }) => {
                     </Typography>
                   </Box>
 
-                  <Tooltip title="Subir">
-                    <span>
-                      <IconButton size="small" disabled={idx === 0} onClick={() => moverCategoria(cat, -1)}>
-                        <KeyboardArrowUp fontSize="small" />
-                      </IconButton>
-                    </span>
-                  </Tooltip>
-                  <Tooltip title="Bajar">
-                    <span>
-                      <IconButton size="small" disabled={idx === catalogoActivo.length - 1} onClick={() => moverCategoria(cat, 1)}>
-                        <KeyboardArrowDown fontSize="small" />
-                      </IconButton>
-                    </span>
-                  </Tooltip>
                   <Tooltip title="Editar">
                     <IconButton size="small" color="primary" onClick={() => editarCategoria(cat)}>
                       <Edit fontSize="small" />
@@ -1093,16 +1070,24 @@ const GestionPlanes = ({ usuarioActual }) => {
                   </TextField>
                 </Box>
 
-                <TextField
-                  select fullWidth size="small" label="Cómo se muestran sus planes" sx={{ mb: 1.5 }}
-                  value={formCategoria.vista}
-                  onChange={(e) => setFormCategoria({ ...formCategoria, vista: e.target.value })}
-                  helperText="Tabla: una sola velocidad. Tarjetas: descarga y subida."
-                >
-                  {VISTAS_CATEGORIA.map(v => (
-                    <MenuItem key={v.clave} value={v.clave}>{v.etiqueta}</MenuItem>
-                  ))}
-                </TextField>
+                <Box sx={{ display: 'flex', gap: 1.5, mb: 1.5 }}>
+                  <TextField
+                    select fullWidth size="small" label="Cómo se muestran sus planes"
+                    value={formCategoria.vista}
+                    onChange={(e) => setFormCategoria({ ...formCategoria, vista: e.target.value })}
+                    helperText="Tabla: una sola velocidad. Tarjetas: descarga y subida."
+                  >
+                    {VISTAS_CATEGORIA.map(v => (
+                      <MenuItem key={v.clave} value={v.clave}>{v.etiqueta}</MenuItem>
+                    ))}
+                  </TextField>
+                  <TextField
+                    size="small" label="Orden" sx={{ width: 110 }}
+                    value={formCategoria.orden}
+                    onChange={(e) => setFormCategoria({ ...formCategoria, orden: e.target.value.replace(/\D/g, '') })}
+                    helperText="Menor primero"
+                  />
+                </Box>
 
                 <FormControlLabel
                   sx={{ mb: 1 }}
