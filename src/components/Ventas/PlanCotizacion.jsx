@@ -1167,6 +1167,10 @@ const PlanCotizacion = ({
               <StepContent>
                 {renderStepContent(index)}
                 <Box sx={{ mt: 3 }}>
+                  {/* Atrás va primero: retroceder a la izquierda y avanzar a la
+                      derecha es como se lee el resto del sistema y como esperan
+                      los steppers en general. */}
+                  <Button disabled={index === 0} onClick={handleBack} sx={{ mr: 1 }}>Atrás</Button>
                   <Button
                     variant="contained"
                     onClick={index === 2 ? handleSubmit : handleNext}
@@ -1174,7 +1178,6 @@ const PlanCotizacion = ({
                   >
                     {loadingContrato ? <CircularProgress size={20} color="inherit" /> : (index === 2 ? 'Revisar y Finalizar' : 'Siguiente')}
                   </Button>
-                  <Button disabled={index === 0} onClick={handleBack} sx={{ ml: 1 }}>Atrás</Button>
                 </Box>
               </StepContent>
             </Step>

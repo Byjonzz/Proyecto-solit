@@ -868,11 +868,13 @@ const NuevoProspect = ({
                 {renderStepContent(index)}
 
                 <Box sx={{ mb: 2, mt: 3 }}>
-                  <Button variant="contained" onClick={handleNext} disabled={guardando} color={isOnline ? "primary" : "warning"} sx={{ mr: 1 }}>
+                  {/* Atrás primero y la acción principal al final, igual que en
+                      el formulario de contrato. */}
+                  <Button disabled={index === 0 || guardando} onClick={handleBack} sx={{ mr: 1 }}>Atrás</Button>
+                  {isStepOptional(index) && <Button color="inherit" onClick={handleSkip} sx={{ mr: 1 }}>Saltar</Button>}
+                  <Button variant="contained" onClick={handleNext} disabled={guardando} color={isOnline ? "primary" : "warning"}>
                     {guardando ? 'Guardando...' : (index === pasos.length - 1 ? (isOnline ? 'Finalizar Registro' : 'Guardar Localmente') : 'Continuar')}
                   </Button>
-                  {isStepOptional(index) && <Button color="inherit" onClick={handleSkip} sx={{ mr: 1 }}>Saltar</Button>}
-                  <Button disabled={index === 0 || guardando} onClick={handleBack} sx={{ mr: 1 }}>Atrás</Button>
                 </Box>
               </StepContent>
             </Step>
