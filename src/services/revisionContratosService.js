@@ -7,7 +7,10 @@ export const ESTATUS_CONTRATO = {
   PENDIENTE: 'Pendiente Asignar',
   RECHAZADO: 'Rechazado',
   ASIGNADO: 'Asignado',
-  COMPLETADO: 'Completado'
+  COMPLETADO: 'Completado',
+  // El cliente se echó para atrás. Es un final, no un paso: de aquí el contrato
+  // no vuelve a revisión ni se corrige, solo queda archivado.
+  CANCELADO: 'Cancelado'
 };
 
 // Un contrato "en instalación" ya pasó la validación de logística: tiene cita
@@ -29,6 +32,17 @@ export const MOTIVOS_RECHAZO = [
   { clave: 'datos', etiqueta: 'Los datos del cliente no coinciden con el INE' }
 ];
 
+// Por qué se cayó la venta. Se guardan como texto igual que los del rechazo,
+// para que el registro se entienda sin tener que descifrar una clave.
+export const MOTIVOS_CANCELACION = [
+  { clave: 'no_quiere', etiqueta: 'El cliente ya no quiere el servicio' },
+  { clave: 'otra_compania', etiqueta: 'Se contrató con otra compañía' },
+  { clave: 'sin_cobertura', etiqueta: 'No hay cobertura en el domicilio' },
+  { clave: 'no_localizable', etiqueta: 'El cliente ya no responde' },
+  { clave: 'mudanza', etiqueta: 'El cliente se muda del domicilio' },
+  { clave: 'precio', etiqueta: 'No aceptó el costo del servicio' }
+];
+
 // Qué foto debe volver a subir el canvaceador según el motivo marcado.
 export const FOTO_POR_MOTIVO = {
   ine_frente: 'foto_ine_frente',
@@ -43,6 +57,20 @@ export const revisionContratosService = {
     const { data } = await api.patch(`${ENDPOINT}${contratoId}/`, {
       estatus: ESTATUS_CONTRATO.RECHAZADO,
       motivo_rechazo: motivo
+    });
+    return data;
+  },
+
+  /**
+   * Se cae la venta: el contrato se archiva.
+   *
+   * No toca las evidencias ni los datos: el contrato queda tal cual quedó, solo
+   * cambia de estatus. Es lo que lo vuelve útil como registro.
+   */
+  cancelar: async (contratoId, motivo) => {
+    const { data } = await api.patch(`${ENDPOINT}${contratoId}/`, {
+      estatus: ESTATUS_CONTRATO.CANCELADO,
+      motivo_cancelacion: motivo
     });
     return data;
   },

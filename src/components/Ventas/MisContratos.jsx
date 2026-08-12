@@ -7,7 +7,7 @@ import {
 } from '@mui/material';
 import {
   Build, Cancel, Visibility, Close, CloudUpload, Send,
-  CheckCircle, ReportProblem, Person, Phone, Home, LocalOffer
+  CheckCircle, ReportProblem, Person, Phone, Home, LocalOffer, Block
 } from '@mui/icons-material';
 
 import {
@@ -29,7 +29,10 @@ const CAMPOS_FOTO = [
 
 const FILTROS = [
   { value: 'instalacion', label: 'En Instalación', icono: Build, color: '#3b82f6', colorHover: '#2563eb' },
-  { value: 'rechazados', label: 'Rechazados', icono: Cancel, color: '#ef4444', colorHover: '#dc2626' }
+  { value: 'rechazados', label: 'Rechazados', icono: Cancel, color: '#ef4444', colorHover: '#dc2626' },
+  // Gris: no es un problema que el canvaceador deba resolver, es una venta que
+  // ya no va. Solo se consulta.
+  { value: 'cancelados', label: 'Cancelados', icono: Block, color: '#64748b', colorHover: '#475569' }
 ];
 
 const MisContratos = ({ usuarioActual }) => {
@@ -72,7 +75,8 @@ const MisContratos = ({ usuarioActual }) => {
 
   const listas = useMemo(() => ({
     instalacion: contratos.filter(c => ESTATUS_EN_INSTALACION.includes(c.estatus)),
-    rechazados: contratos.filter(c => c.estatus === ESTATUS_CONTRATO.RECHAZADO)
+    rechazados: contratos.filter(c => c.estatus === ESTATUS_CONTRATO.RECHAZADO),
+    cancelados: contratos.filter(c => c.estatus === ESTATUS_CONTRATO.CANCELADO)
   }), [contratos]);
 
   const visibles = listas[filtro] || [];
@@ -200,6 +204,13 @@ const MisContratos = ({ usuarioActual }) => {
         </Alert>
       )}
 
+      {filtro === 'cancelados' && listas.cancelados.length > 0 && (
+        <Alert severity="info" icon={<Block />}>
+          Ventas que ya no se concretaron. Se conservan
+          <strong> solo como registro</strong>: no se pueden editar ni reenviar a revisión.
+        </Alert>
+      )}
+
       <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2 }}>
         <Table>
           <TableHead sx={{ backgroundColor: '#f8fafc' }}>
@@ -209,7 +220,9 @@ const MisContratos = ({ usuarioActual }) => {
               <TableCell sx={{ fontWeight: 600 }}>Plan</TableCell>
               <TableCell sx={{ fontWeight: 600 }}>Dirección</TableCell>
               <TableCell sx={{ fontWeight: 600 }}>
-                {filtro === 'rechazados' ? 'Motivo del rechazo' : 'Fecha de venta'}
+                {filtro === 'rechazados' ? 'Motivo del rechazo'
+                  : filtro === 'cancelados' ? 'Motivo de la cancelación'
+                  : 'Fecha de venta'}
               </TableCell>
               <TableCell sx={{ fontWeight: 600 }}>Estatus</TableCell>
               <TableCell align="center" sx={{ fontWeight: 600 }}>Acción</TableCell>
@@ -222,7 +235,9 @@ const MisContratos = ({ usuarioActual }) => {
                   <Typography variant="body2" color="text.secondary">
                     {filtro === 'instalacion'
                       ? 'Todavía no tienes contratos con cita de instalación asignada'
-                      : 'No tienes contratos rechazados. Buen trabajo.'}
+                      : filtro === 'cancelados'
+                        ? 'No tienes contratos cancelados'
+                        : 'No tienes contratos rechazados. Buen trabajo.'}
                   </Typography>
                 </TableCell>
               </TableRow>
@@ -243,6 +258,15 @@ const MisContratos = ({ usuarioActual }) => {
                         {c.veces_rechazado > 1 && ` · regresado ${c.veces_rechazado} veces`}
                       </Typography>
                     </Box>
+                  ) : filtro === 'cancelados' ? (
+                    <Box>
+                      <Typography variant="body2" sx={{ color: '#475569', fontWeight: 600 }}>
+                        {c.motivo_cancelacion || 'Sin motivo registrado'}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Cancelado el {formatFecha(c.fecha_cancelacion)}
+                      </Typography>
+                    </Box>
                   ) : (
                     <Typography variant="body2" sx={{ fontWeight: 600, color: '#475569' }}>
                       {formatFecha(c.fecha_creacion)}
@@ -254,12 +278,24 @@ const MisContratos = ({ usuarioActual }) => {
                     label={c.estatus}
                     size="small"
                     color={c.estatus === ESTATUS_CONTRATO.RECHAZADO ? 'error'
+                      : c.estatus === ESTATUS_CONTRATO.CANCELADO ? 'default'
                       : c.estatus.startsWith('Complet') ? 'success' : 'info'}
                     sx={{ fontWeight: 600 }}
                   />
                 </TableCell>
                 <TableCell align="center">
-                  {filtro === 'instalacion' ? (
+                  {/* Se pregunta por 'rechazados' y no por "el que no es
+                      instalación": así un filtro nuevo nace de solo lectura en
+                      vez de heredar el botón de corregir sin querer. */}
+                  {filtro === 'rechazados' ? (
+                    <Button
+                      variant="contained" size="small" color="error" startIcon={<CloudUpload />}
+                      onClick={() => abrirCorreccion(c)}
+                      sx={{ textTransform: 'none', borderRadius: 1.5 }}
+                    >
+                      Corregir fotos
+                    </Button>
+                  ) : (
                     <Button
                       variant="outlined" size="small" startIcon={<Visibility />}
                       onClick={() => setDetalle(c)}
@@ -269,14 +305,6 @@ const MisContratos = ({ usuarioActual }) => {
                       }}
                     >
                       Ver detalle
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="contained" size="small" color="error" startIcon={<CloudUpload />}
-                      onClick={() => abrirCorreccion(c)}
-                      sx={{ textTransform: 'none', borderRadius: 1.5 }}
-                    >
-                      Corregir fotos
                     </Button>
                   )}
                 </TableCell>
@@ -296,9 +324,21 @@ const MisContratos = ({ usuarioActual }) => {
         <DialogContent dividers>
           {detalle && (
             <Stack spacing={1.5}>
-              <Alert severity="info" icon={<Visibility />}>
-                Vista de solo lectura. Este contrato ya pasó la validación de logística.
-              </Alert>
+              {detalle.estatus === ESTATUS_CONTRATO.CANCELADO ? (
+                <Alert severity="warning" icon={<Block />}>
+                  Contrato cancelado el {formatFecha(detalle.fecha_cancelacion)}. Queda solo
+                  como registro: no se puede editar ni reenviar.
+                  {detalle.motivo_cancelacion && (
+                    <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 700 }}>
+                      {detalle.motivo_cancelacion}
+                    </Typography>
+                  )}
+                </Alert>
+              ) : (
+                <Alert severity="info" icon={<Visibility />}>
+                  Vista de solo lectura. Este contrato ya pasó la validación de logística.
+                </Alert>
+              )}
 
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <Person fontSize="small" color="action" />

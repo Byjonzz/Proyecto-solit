@@ -10,7 +10,7 @@ import {
   PieChartOutlined, BarChartOutlined, Pending, AssignmentTurnedIn,
   CheckCircle, Edit, Visibility, CreditCard, Receipt, Home, Schedule,
   CommentOutlined,ZoomIn, RotateRight, Navigation, NotificationsActive,
-  Timer, Flag, ThumbUp, Cancel, ReportProblem, PictureAsPdf, OpenInNew
+  Timer, Flag, ThumbUp, Cancel, ReportProblem, PictureAsPdf, OpenInNew, Block
 } from '@mui/icons-material';
 import { useContratos } from '../../hooks/useContratos';
 import api from '../../services/api';
@@ -18,7 +18,9 @@ import MapaRutaInstalacion from './MapaRutaInstalacion';
 import { aPuntoNumerico } from '../../utils/geo';
 import { formatearDuracion } from '../../services/rutaService';
 import { ESTADOS } from '../../services/instalacionesSeguimientoService';
-import { revisionContratosService, MOTIVOS_RECHAZO } from '../../services/revisionContratosService';
+import {
+  revisionContratosService, MOTIVOS_RECHAZO, MOTIVOS_CANCELACION
+} from '../../services/revisionContratosService';
 import { esPdf } from '../../utils/evidencias';
 
 
@@ -172,6 +174,52 @@ const AgendaInstalaciones = () => {
     }
   };
 
+  const [ordenCancelacion, setOrdenCancelacion] = useState(null);
+  const [motivosCancelacion, setMotivosCancelacion] = useState([]);
+  const [motivoCancelacionLibre, setMotivoCancelacionLibre] = useState('');
+  const [cancelando, setCancelando] = useState(false);
+
+  const handleAbrirCancelacion = (orden) => {
+    setOrdenCancelacion(orden);
+    setMotivosCancelacion([]);
+    setMotivoCancelacionLibre('');
+  };
+
+  const toggleMotivoCancelacion = (clave) => {
+    setMotivosCancelacion(prev =>
+      prev.includes(clave) ? prev.filter(m => m !== clave) : [...prev, clave]
+    );
+  };
+
+  const handleConfirmarCancelacion = async () => {
+    if (!ordenCancelacion) return;
+
+    const textos = MOTIVOS_CANCELACION
+      .filter(m => motivosCancelacion.includes(m.clave))
+      .map(m => m.etiqueta);
+    if (motivoCancelacionLibre.trim()) textos.push(motivoCancelacionLibre.trim());
+
+    // Sin motivo el registro no sirve de nada: dentro de tres meses nadie va a
+    // saber por qué se cayó esta venta.
+    if (textos.length === 0) {
+      setErrorAsignacion('Marca al menos un motivo: es lo único que queda del contrato como registro.');
+      return;
+    }
+
+    setCancelando(true);
+    setErrorAsignacion(null);
+    try {
+      await revisionContratosService.cancelar(ordenCancelacion.contrato_id, textos.join(' · '));
+      setOrdenCancelacion(null);
+      setMensajeExito(true);
+      await Promise.all([refetchPendientesSilencioso(), cargarInstalacionesReales()]);
+    } catch (err) {
+      setErrorAsignacion('No se pudo cancelar el contrato: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setCancelando(false);
+    }
+  };
+
   const [seguimientoOrden, setSeguimientoOrden] = useState(null);
   const [buscandoPosicion, setBuscandoPosicion] = useState(false);
   const handleAbrirSeguimiento = async (orden) => {
@@ -313,9 +361,6 @@ const AgendaInstalaciones = () => {
       telefono: contrato.telefono1,
       correo: contrato.correo,
       nota: instalacionDB?.nota || contrato.nota_logistica || '',
-      // Aviso que dejó ventas al capturar el contrato. Va aparte de `nota`, que
-      // es la que escribe logística al agendar: si compartieran campo, agendar
-      // la cita borraría de la vista lo que avisó ventas.
       notas_contrato: contrato.notas || '',
       tecnico_id: instalacionDB?.tecnico_id || contrato.tecnico_id,
       foto_ine_frente: contrato.foto_ine_frente || null,
@@ -950,7 +995,7 @@ const AgendaInstalaciones = () => {
                   </TableCell>
                   <TableCell align="center">
                     {filtroEstatus === 'pendientes' && (
-                      <Stack direction="row" spacing={1} justifyContent="center">
+                      <Stack direction="row" spacing={1} justifyContent="center" sx={{ flexWrap: 'wrap', gap: 1 }}>
                         <Button
                           variant="outlined" size="small" startIcon={<Visibility />}
                           onClick={() => handleAbrirEditar(orden)}
@@ -971,6 +1016,23 @@ const AgendaInstalaciones = () => {
                         >
                           Rechazar
                         </Button>
+
+                        {/* Gris y no rojo a propósito: cancelar no es un error
+                            del canvaceador como el rechazo, es una venta que se
+                            cayó. Y no vuelve: de aquí el contrato solo queda
+                            archivado. */}
+                        <Tooltip title="La venta se cayó: archiva el contrato como registro">
+                          <Button
+                            variant="outlined" size="small" startIcon={<Block />}
+                            onClick={() => handleAbrirCancelacion(orden)}
+                            sx={{
+                              textTransform: 'none', borderRadius: 1.5, color: '#64748b', borderColor: '#94a3b8',
+                              '&:hover': { borderColor: '#475569', backgroundColor: 'rgba(100, 116, 139, 0.04)' }
+                            }}
+                          >
+                            Cancelar
+                          </Button>
+                        </Tooltip>
 
                         <Button
                           variant="contained" size="small" onClick={() => handleAbrirModal(orden)}
@@ -1030,9 +1092,10 @@ const AgendaInstalaciones = () => {
                         >
                           Notas
                         </Button>
+
                       </Stack>
                     )}
-                    
+
                     {filtroEstatus === 'completadas' && (
                       <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
                         Finalizada
@@ -1579,6 +1642,7 @@ const AgendaInstalaciones = () => {
             El canvaceador verá este motivo en su apartado de <strong>Mis Contratos → Rechazados</strong>
             y solo podrá reemplazar las fotos.
           </Alert>
+
         </DialogContent>
 
         <DialogActions sx={{ p: 2 }}>
@@ -1589,6 +1653,90 @@ const AgendaInstalaciones = () => {
             disabled={rechazando || motivosMarcados.length === 0}
           >
             {rechazando ? 'Rechazando...' : 'Rechazar y devolver'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(ordenCancelacion)}
+        onClose={() => !cancelando && setOrdenCancelacion(null)}
+        maxWidth="sm"
+        fullWidth
+        slotProps={{ paper: { sx: { borderRadius: 3 } } }}
+      >
+        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Block sx={{ color: '#475569' }} />
+            <Typography variant="h6" component="span" sx={{ fontWeight: 700, color: '#334155' }}>
+              Cancelar Folio: {ordenCancelacion?.id}
+            </Typography>
+          </Box>
+          <IconButton onClick={() => setOrdenCancelacion(null)} size="small" disabled={cancelando}><Close /></IconButton>
+        </DialogTitle>
+
+        <DialogContent dividers>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            El contrato de <strong>{ordenCancelacion?.cliente}</strong> se archiva y sale de
+            esta agenda. ¿Por qué se cayó la venta?
+          </Typography>
+
+          <Stack spacing={0.5}>
+            {MOTIVOS_CANCELACION.map(({ clave, etiqueta }) => (
+              <Paper
+                key={clave}
+                variant="outlined"
+                onClick={() => toggleMotivoCancelacion(clave)}
+                sx={{
+                  p: 1.2, borderRadius: 2, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 1,
+                  borderColor: motivosCancelacion.includes(clave) ? '#64748b' : '#e2e8f0',
+                  borderWidth: motivosCancelacion.includes(clave) ? 2 : 1,
+                  bgcolor: motivosCancelacion.includes(clave) ? 'rgba(100,116,139,0.06)' : 'transparent'
+                }}
+              >
+                <Chip
+                  size="small"
+                  label={motivosCancelacion.includes(clave) ? '✓' : ''}
+                  sx={{
+                    width: 28, fontWeight: 800,
+                    bgcolor: motivosCancelacion.includes(clave) ? '#64748b' : undefined,
+                    color: motivosCancelacion.includes(clave) ? 'white' : undefined
+                  }}
+                />
+                <Typography variant="body2" sx={{ fontWeight: motivosCancelacion.includes(clave) ? 700 : 400 }}>
+                  {etiqueta}
+                </Typography>
+              </Paper>
+            ))}
+          </Stack>
+
+          <TextField
+            label="Detalle adicional (opcional)"
+            placeholder="Ej. Dijo que lo vuelve a solicitar el próximo mes"
+            fullWidth multiline rows={2} size="small" sx={{ mt: 2 }}
+            value={motivoCancelacionLibre}
+            onChange={(e) => setMotivoCancelacionLibre(e.target.value)}
+          />
+
+          <Alert severity="warning" sx={{ mt: 2 }}>
+            Esto no se puede deshacer desde el sistema. El contrato quedará en
+            <strong> Mis Contratos → Cancelados</strong> del canvaceador, como registro de
+            solo lectura: no podrá editarlo ni reenviarlo.
+          </Alert>
+
+        </DialogContent>
+
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={() => setOrdenCancelacion(null)} disabled={cancelando} color="inherit">
+            Mejor no
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={cancelando ? <CircularProgress size={16} color="inherit" /> : <Block />}
+            onClick={handleConfirmarCancelacion}
+            disabled={cancelando || motivosCancelacion.length === 0}
+            sx={{ bgcolor: '#475569', '&:hover': { bgcolor: '#334155' } }}
+          >
+            {cancelando ? 'Cancelando...' : 'Cancelar contrato'}
           </Button>
         </DialogActions>
       </Dialog>
